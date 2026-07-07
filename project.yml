@@ -46,6 +46,10 @@ targets:
           - ScannerKit
           - InventoryKit
           - LedgerKit
+          - ThermalKit
+          - HonestKit
+          - MemoryKit
+          - BatteryKit
       - target: StockpileWidget
         embed: true
     settings:

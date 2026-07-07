@@ -79,6 +79,10 @@ struct AppsView: View {
                         .padding(.vertical, 10)
                         Divider().overlay(Theme.hairline)
                     }
+                    if !model.orphans.isEmpty {
+                        ghostsSection
+                        Divider().overlay(Theme.hairline)
+                    }
                     tableHeader
                     Divider().overlay(Theme.hairline)
                     appList
@@ -149,6 +153,38 @@ struct AppsView: View {
                     detail: error.localizedDescription
                 ))
                 banner = (message: "Couldn't uninstall \(plan.app.name): \(error.localizedDescription)", isError: true)
+            }
+        }
+    }
+
+    @State private var ghostsExpanded = false
+
+    private var ghostsSection: some View {
+        VStack(spacing: 0) {
+            Button { withAnimation(.snappy) { ghostsExpanded.toggle() } } label: {
+                HStack(spacing: 10) {
+                    IconTile(symbol: "moon.stars", tint: Theme.purgeable, size: 26)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("\(model.orphans.count) ghost\(model.orphans.count == 1 ? "" : "s") — leftovers from deleted apps")
+                            .font(.system(size: 13, weight: .medium))
+                        Text("\(model.orphanTotal.bytesFormatted) · residue no uninstaller catches. Review before clearing.")
+                            .font(.system(size: 11)).foregroundStyle(.tertiary)
+                    }
+                    Spacer()
+                    Image(systemName: ghostsExpanded ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, 28).padding(.vertical, 12)
+            }
+            .buttonStyle(.plain)
+
+            if ghostsExpanded {
+                VStack(spacing: 2) {
+                    ForEach(model.orphans) { orphan in
+                        GhostRow(orphan: orphan) { Task { await model.clearOrphan(orphan) } }
+                    }
+                }
+                .padding(.horizontal, 28).padding(.bottom, 12)
             }
         }
     }
@@ -322,13 +358,67 @@ private struct AppRow: View {
     }
 }
 
+private struct GhostRow: View {
+    let orphan: Orphan
+    let onClear: () -> Void
+    @State private var hovering = false
+
+    private var abbreviated: String {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        return orphan.path.hasPrefix(home) ? "~" + orphan.path.dropFirst(home.count) : orphan.path
+    }
+
+    var body: some View {
+        HStack(spacing: 12) {
+            IconTile(symbol: "questionmark.folder", size: 26)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(orphan.bundleID).font(.system(size: 12, weight: .medium)).lineLimit(1)
+                Text(abbreviated).font(.system(size: 10.5)).foregroundStyle(.tertiary).lineLimit(1).truncationMode(.middle)
+            }
+            Spacer(minLength: 12)
+            Text(orphan.sizeBytes.bytesFormatted)
+                .font(.system(size: 12, weight: .semibold, design: .rounded)).monospacedDigit()
+            Button(action: onClear) {
+                Image(systemName: "trash")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(hovering ? Theme.tierData : Color.white.opacity(0.15))
+                    .frame(width: 24, height: 24)
+            }
+            .buttonStyle(Pressable())
+            .help("Move this leftover to Trash — recoverable")
+        }
+        .padding(.horizontal, 12).padding(.vertical, 7)
+        .background(hovering ? Theme.surface2 : .clear, in: RoundedRectangle(cornerRadius: Theme.radiusRow))
+        .onHover { hovering = $0 }
+    }
+}
+
 /// Loads the census fast (names + sources), then streams sizes in.
 @MainActor
 @Observable
 final class AppsModel {
     var apps: [InstalledApp] = []
+    var orphans: [Orphan] = []
     var sizingInFlight = 0
     private var loaded = false
+
+    var orphanTotal: Int64 { orphans.reduce(0) { $0 + $1.sizeBytes } }
+
+    func clearOrphan(_ orphan: Orphan) async {
+        do {
+            try TrashAction.moveToTrash(path: orphan.path)
+            orphans.removeAll { $0.id == orphan.id }
+            await LedgerStore.shared.append(LedgerEvent(
+                kind: .cleared,
+                title: "Cleared ghost: \(orphan.bundleID)",
+                detail: "Leftover from a deleted app (\(orphan.sizeBytes.bytesFormatted)) moved to Trash — recoverable.",
+                bytes: orphan.sizeBytes
+            ))
+        } catch {
+            await LedgerStore.shared.append(LedgerEvent(
+                kind: .cleared, title: "Ghost clear failed: \(orphan.bundleID)", detail: error.localizedDescription))
+        }
+    }
 
     func load() async {
         guard !loaded else { return }
@@ -341,6 +431,13 @@ final class AppsModel {
         }.value
 
         apps = collected
+
+        // Ghost hunt: residue from apps no longer installed.
+        let installedIDs = Set(collected.compactMap(\.bundleIdentifier))
+        Task.detached(priority: .utility) {
+            let found = OrphanFinder.find(installedBundleIDs: installedIDs)
+            await MainActor.run { self.orphans = found }
+        }
 
         // Cache pass first: bundle mtimes change on update, so unchanged
         // apps get instant sizes with zero disk walking.

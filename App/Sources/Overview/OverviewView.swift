@@ -7,24 +7,49 @@ import LedgerKit
 @MainActor
 enum AppRuntime {
     static var snapshotRecorded = false
+    static var memoryRecorded = false
+    static var heatRecorded = false
 }
 
 /// The honest numbers: one protagonist numeral, a metric stack beside it,
 /// and the reclaimable strip below. Both accountings, always.
 struct OverviewView: View {
+    var onNavigate: (AppSection) -> Void = { _ in }
     @State private var accounting: DiskAccounting?
     @State private var loadError: String?
     @State private var reclaimable = ReclaimableModel.shared
     @State private var previousSnapshot: LedgerEvent?
+    @State private var reportCopied = false
+    @State private var glance = SystemGlance()
+    @State private var updates = UpdateChecker.shared
 
     var body: some View {
         Screen(
             title: "Overview",
-            subtitle: "Your disk, honestly — physical bytes and what's effectively yours."
+            subtitle: "Your disk, honestly — physical bytes and what's effectively yours.",
+            actions: {
+                BarButton(label: reportCopied ? "Copied ✓" : "Copy Report", symbol: "doc.on.doc") {
+                    Task {
+                        let report = await SystemReport.build(reclaimable: reclaimable.grandTotal)
+                        SystemReport.copyToClipboard(report)
+                        reportCopied = true
+                        try? await Task.sleep(for: .seconds(2))
+                        reportCopied = false
+                    }
+                }
+            }
         ) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
                     SetupCard()
+
+                    if let latest = updates.latestVersion {
+                        UpdateBanner(version: latest)
+                    }
+
+                    if !glance.tiles.isEmpty {
+                        glanceRow
+                    }
 
                     if let accounting {
                         CapacityHero(accounting: accounting)
@@ -44,6 +69,32 @@ struct OverviewView: View {
             }
         }
         .task { await load() }
+    }
+
+    private var glanceRow: some View {
+        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 14), count: glance.tiles.count), spacing: 14) {
+            ForEach(glance.tiles) { tile in
+                Button { onNavigate(tile.section) } label: {
+                    Card(padding: 16) {
+                        VStack(alignment: .leading, spacing: 10) {
+                            HStack(spacing: 8) {
+                                IconTile(symbol: tile.symbol, tint: tile.tint.color, size: 24)
+                                Text(tile.label.uppercased())
+                                    .font(.system(size: 11, weight: .semibold)).tracking(1.3).foregroundStyle(.secondary)
+                                Spacer()
+                                Image(systemName: "chevron.right").font(.system(size: 10, weight: .semibold)).foregroundStyle(.quaternary)
+                            }
+                            Text(tile.value)
+                                .font(.system(size: 22, weight: .semibold, design: .rounded)).tracking(-0.4)
+                                .foregroundStyle(tile.tint.color).monospacedDigit().lineLimit(1)
+                            Text(tile.detail)
+                                .font(.system(size: 11)).foregroundStyle(.tertiary).lineLimit(1)
+                        }
+                    }
+                }
+                .buttonStyle(Pressable())
+            }
+        }
     }
 
     private var reclaimableStrip: some View {
@@ -106,6 +157,8 @@ struct OverviewView: View {
 
     private func load() async {
         Task { await reclaimable.loadIfNeeded() }
+        Task { await updates.checkIfNeeded() }
+        glance = SystemGlance.read()
         do {
             let measured = try DiskAccounting.measure()
             accounting = measured

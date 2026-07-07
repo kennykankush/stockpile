@@ -5,6 +5,9 @@ enum AppSection: String, CaseIterable, Identifiable {
     case descend = "Descend"
     case caches = "Caches"
     case apps = "Apps"
+    case heat = "Heat"
+    case memory = "Memory"
+    case battery = "Battery"
     case startup = "Startup"
     case ledger = "Ledger"
 
@@ -16,6 +19,9 @@ enum AppSection: String, CaseIterable, Identifiable {
         case .descend: "square.stack.3d.down.right"
         case .caches: "arrow.3.trianglepath"
         case .apps: "square.grid.2x2"
+        case .heat: "thermometer.medium"
+        case .memory: "memorychip"
+        case .battery: "battery.100percent"
         case .startup: "power"
         case .ledger: "book.closed"
         }
@@ -66,10 +72,13 @@ struct RootView: View {
             ZStack {
                 Backdrop()
                 switch selection {
-                case .overview: OverviewView()
+                case .overview: OverviewView { selection = $0 }
                 case .descend: DescendView()
                 case .caches: CachesView()
                 case .apps: AppsView()
+                case .heat: HeatView()
+                case .memory: MemoryView()
+                case .battery: BatteryView()
                 case .startup: StartupView()
                 case .ledger: LedgerView()
                 }

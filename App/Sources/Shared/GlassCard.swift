@@ -251,6 +251,9 @@ struct StatStrip: View {
                 }
             }
         }
+        // The divider Rectangles are vertically greedy — pin to ideal height
+        // so the strip never inflates to fill a fixed-layout parent.
+        .fixedSize(horizontal: false, vertical: true)
     }
 }
 
