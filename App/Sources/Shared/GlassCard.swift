@@ -219,6 +219,8 @@ struct StatStrip: View {
     let columns: [Column]
 
     var body: some View {
+        // fixedSize: the divider Rectangles are vertically greedy — without
+        // this, the strip expands to fill any fixed-height parent.
         Card(padding: 0) {
             HStack(spacing: 0) {
                 ForEach(Array(columns.enumerated()), id: \.element.id) { index, col in
@@ -251,6 +253,7 @@ struct StatStrip: View {
                 }
             }
         }
+        .fixedSize(horizontal: false, vertical: true)
     }
 }
 
