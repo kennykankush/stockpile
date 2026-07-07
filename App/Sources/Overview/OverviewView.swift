@@ -12,8 +12,8 @@ enum AppRuntime {
 /// The honest numbers. Both accountings, side by side, always.
 struct OverviewView: View {
     @State private var accounting: DiskAccounting?
-    @State private var rulesCount: Int = 0
     @State private var loadError: String?
+    @State private var reclaimable = ReclaimableModel.shared
 
     var body: some View {
         ScrollView {
@@ -61,11 +61,15 @@ struct OverviewView: View {
                 caption: "Untouched space — the df-style number."
             )
             StatTile(
-                symbol: "checklist",
+                symbol: "leaf",
                 tint: Theme.tierCache,
-                label: "Rules loaded",
-                value: "\(rulesCount)",
-                caption: "Allowlist-only. Anything unrecognized is your data — untouchable."
+                label: "Reclaimable",
+                value: reclaimable.isLoading || reclaimable.items.isEmpty
+                    ? "…"
+                    : reclaimable.grandTotal.bytesFormatted,
+                caption: reclaimable.items.isEmpty
+                    ? "Finding recognized locations…"
+                    : "Across \(reclaimable.items.count) recognized locations — see Caches."
             )
         }
     }
@@ -82,10 +86,10 @@ struct OverviewView: View {
     }
 
     private func load() async {
+        Task { await reclaimable.loadIfNeeded() }
         do {
             let measured = try DiskAccounting.measure()
             accounting = measured
-            rulesCount = try RulesRegistry.bundled().rules.count
 
             if !AppRuntime.snapshotRecorded {
                 AppRuntime.snapshotRecorded = true

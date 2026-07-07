@@ -20,6 +20,11 @@ public struct Rule: Codable, Sendable, Identifiable, Hashable {
             case directoryName
             /// Matches one exact path relative to the user's home directory.
             case homeRelativePath
+            /// Matches any direct child of a home-relative path — for
+            /// directories that are cache by OS convention (`~/Library/Caches`,
+            /// XDG `~/.cache`). Specific rules win by ordering; this is the
+            /// generic fallback.
+            case homeRelativeParent
         }
 
         public let kind: Kind

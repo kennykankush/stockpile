@@ -37,6 +37,11 @@ public struct RulesRegistry: Sendable {
                 if standardized.path == target.path {
                     return rule
                 }
+            case .homeRelativeParent:
+                let parent = home.appending(path: rule.match.value).standardizedFileURL
+                if standardized.deletingLastPathComponent().path == parent.path {
+                    return rule
+                }
             case .directoryName:
                 guard standardized.lastPathComponent == rule.match.value else { continue }
                 if let sibling = rule.match.requiresSibling {

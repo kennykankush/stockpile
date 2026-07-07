@@ -3,6 +3,7 @@ import SwiftUI
 enum AppSection: String, CaseIterable, Identifiable {
     case overview = "Overview"
     case descend = "Descend"
+    case caches = "Caches"
     case apps = "Apps"
     case startup = "Startup"
     case ledger = "Ledger"
@@ -13,6 +14,7 @@ enum AppSection: String, CaseIterable, Identifiable {
         switch self {
         case .overview: "gauge.with.dots.needle.50percent"
         case .descend: "square.stack.3d.down.right"
+        case .caches: "arrow.3.trianglepath"
         case .apps: "square.grid.2x2"
         case .startup: "power"
         case .ledger: "book.closed"
@@ -60,6 +62,7 @@ struct RootView: View {
                 switch selection {
                 case .overview: OverviewView()
                 case .descend: DescendView()
+                case .caches: CachesView()
                 case .apps: AppsView()
                 case .startup: StartupView()
                 case .ledger: LedgerView()
