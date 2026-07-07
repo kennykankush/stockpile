@@ -23,6 +23,8 @@ struct OverviewView: View {
                     subtitle: "Two accountings of the same volume — physical bytes, and what's effectively yours."
                 )
 
+                SetupCard()
+
                 if let accounting {
                     CapacityHero(accounting: accounting)
                     statGrid(accounting)

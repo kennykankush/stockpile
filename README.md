@@ -1,26 +1,103 @@
-# Stockpile
+<div align="center">
+    <h1>📦 Stockpile</h1>
+    <p><b>Your disk, explained — not just displayed.</b></p>
+</div>
 
-Storage transparency for macOS — your disk, explained, not just displayed.
+![Platform](https://img.shields.io/badge/platform-macOS%2026%2B-blue?style=flat-square)
+![Swift](https://img.shields.io/badge/Swift-6-F05138?style=flat-square)
+![License](https://img.shields.io/github/license/kennykankush/stockpile?style=flat-square)
+![Status](https://img.shields.io/badge/status-pre--release-orange?style=flat-square)
 
-Every gig gets a name in plain words, a reason it exists, and a verdict on whether
-it's safe to let go. No treemaps. No scare tactics. Honest numbers, both accountings.
+Stockpile is a storage transparency app for macOS. Every gig gets a name in
+plain words, a reason it exists, and a verdict on whether it's safe to let go.
+No treemaps. No scare tactics. No "247 issues found!". It informs — you decide.
 
-Read [VISION.md](VISION.md) before building toward anything.
+It shows **both truths about your disk**: physical bytes on disk, and effective
+space after purgeable — because a meter that silently switches between the two
+is exactly how this app got born.
 
-## Development
+> [!NOTE]
+> Stockpile is in active development and not yet notarized for distribution.
+> Build from source below, and read [VISION.md](VISION.md) — every decision
+> traces back to it.
 
-- macOS 26+, Xcode 26+, [XcodeGen](https://github.com/yonaskolb/XcodeGen)
-- `xcodegen generate` → open `Stockpile.xcodeproj`
-- Core logic lives in `Core/` (SPM package, headless, tested): `swift test` from `Core/`
+## Features
 
-## Architecture
+### Overview — the honest numbers
+- [x] Physical **and** effective usage, side by side, always
+- [x] Purgeable space measured and explained, not hidden
+- [x] Disk snapshot recorded each launch (your storage gets a history)
 
-| Piece | Home | Role |
-|---|---|---|
-| `RulesKit` | `Core/` | Versioned allowlist registry: what is safe to clear, and why |
-| `ScannerKit` | `Core/` | Disk accounting (physical + effective) and directory scanning |
-| `InventoryKit` | `Core/` | Installed-app census across sources (cask, formula, App Store, direct) |
-| App | `App/` | SwiftUI shell — Overview, Descend, Apps, Startup, Ledger |
+### Descend — the inward granulizer
+- [x] Click a folder and it becomes the canvas — descend, don't squint
+- [x] Every recognized directory annotated in plain words with a safety tier:
+      🟢 cache (regenerates itself) · 🟡 regenerable (costs a rebuild) · 🔴 your data (never suggested)
+- [x] Session-cached sizing — revisits are instant, refresh on demand
+- [ ] Persistent scan cache across launches
+- [ ] Clear-to-Trash actions, recorded in the Ledger
 
-Safety model: 🟢 pure cache · 🟡 regenerable (with consequences) · 🔴 never suggested.
-Nothing is ever `rm`'d — Trash only, every action recorded in the Ledger.
+### Apps — the totality, by source
+- [x] Every app censused and classified: **App Store · Brew Cask · Brew CLI · Direct**
+- [x] Sizes stream in live; last-used dates surface the forgotten
+- [x] Homebrew read straight from disk (Caskroom/Cellar) — no subprocess, instant
+- [ ] One-click uninstall via the *correct* path per source, with leftover sweep
+
+### Startup — what actually runs at login
+- [x] Login items, LaunchAgents, LaunchDaemons — each showing *what it runs*, in plain words
+- [x] Live PIDs, keep-alive flags, disabled-state detection
+- [x] Reversible controls for user-domain items (bootout + `.DISABLED` rename — never delete)
+- [ ] Privileged helper for root-owned items
+
+### Ledger — storage with a memory
+- [x] Append-only record of every snapshot and every action
+- [ ] Diffs between scans ("Spotify's cache regrew 2.1 GB this week")
+
+### Widget
+- [ ] The anti-gaslight disk widget: honest numbers + reclaimable estimate
+
+## The safety model
+
+The rules registry is **allowlist-only**: Stockpile can only suggest clearing
+paths a versioned rule explicitly recognizes — with guards like *`node_modules`
+only counts beside a `package.json`*. Anything unrecognized is your data and is
+untouchable, no matter how large. Nothing is ever `rm`'d: Trash only, every
+action recorded, everything reversible.
+
+## Requirements
+
+macOS 26 (Tahoe) or later. Native SwiftUI — no Electron, no runtime, no
+background daemons. An anti-bloat app must not be bloat.
+
+## Build from source
+
+```sh
+brew install xcodegen
+git clone https://github.com/kennykankush/stockpile && cd stockpile
+xcodegen generate && open Stockpile.xcodeproj
+```
+
+Core logic lives in `Core/` as a headless, tested Swift package
+(`swift test` from `Core/`): `RulesKit` (the allowlist), `ScannerKit`
+(dual accounting + honest sizing), `InventoryKit` (app census, startup
+catalog), `LedgerKit` (the memory).
+
+## FAQ
+
+**Why does Finder say I have way more free space than `df` does?**
+Purgeable space. macOS promises it can auto-delete certain caches when space
+runs low, and Finder counts that promise as free space. Stockpile shows both
+numbers so you're never lied to. This exact confusion is the app's origin
+story.
+
+**Is it safe?**
+Sizing never follows symlinks and never reads file contents (iCloud dataless
+files stay in the cloud). Deleting — when it ships — is Trash-only and
+ledger-recorded. The tier system is enforced in code and covered by tests.
+
+**Why no treemap?**
+Treemaps show you bytes. Stockpile shows you *meaning*. If you want rectangles,
+GrandPerspective is excellent.
+
+## License
+
+[MIT](LICENSE) — © 2026 Hadi Mulia

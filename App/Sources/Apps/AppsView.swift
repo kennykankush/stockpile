@@ -194,12 +194,30 @@ final class AppsModel {
         }.value
 
         apps = collected
-        sizingInFlight = collected.count
+
+        // Cache pass first: bundle mtimes change on update, so unchanged
+        // apps get instant sizes with zero disk walking.
+        var misses: [InstalledApp] = []
+        for (index, app) in collected.enumerated() {
+            let url = URL(fileURLWithPath: app.bundlePath)
+            let mtime = AllocatedSize.modificationTime(of: url)
+            if let hit = await SizeCache.shared.lookup(path: app.bundlePath, mtime: mtime) {
+                apps[index].sizeBytes = hit.size
+            } else {
+                misses.append(app)
+            }
+        }
+        apps.sort { ($0.sizeBytes ?? -1, $1.name) > ($1.sizeBytes ?? -1, $0.name) }
+        sizingInFlight = misses.count
+        guard !misses.isEmpty else { return }
 
         await withTaskGroup(of: (String, Int64).self) { group in
-            for app in collected {
+            for app in misses {
                 group.addTask {
-                    let size = AllocatedSize.measure(URL(fileURLWithPath: app.bundlePath))
+                    let url = URL(fileURLWithPath: app.bundlePath)
+                    let mtime = AllocatedSize.modificationTime(of: url)
+                    let size = AllocatedSize.measure(url)
+                    await SizeCache.shared.store(path: app.bundlePath, mtime: mtime, size: size)
                     return (app.bundlePath, size)
                 }
             }
@@ -218,5 +236,6 @@ final class AppsModel {
                 }
             }
         }
+        await SizeCache.shared.flush()
     }
 }

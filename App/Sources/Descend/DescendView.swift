@@ -25,9 +25,19 @@ final class DescendModel {
         await scan(url)
     }
 
+    /// Refresh forgets the persistent measurements for this subtree too —
+    /// the one honest way to re-measure after deep changes.
     func refresh() async {
         cache.removeValue(forKey: current.path)
+        if let registry = try? RulesRegistry.bundled() {
+            await DirectoryScanner(registry: registry).invalidate(subtree: current)
+        }
         await scan(current)
+    }
+
+    /// The most stale measurement on screen, for the honesty footnote.
+    var oldestMeasurement: Date? {
+        entries.map(\.measuredAt).min()
     }
 
     private func scan(_ url: URL) async {
@@ -54,6 +64,12 @@ struct DescendView: View {
             HStack(alignment: .center) {
                 breadcrumb
                 Spacer()
+                if let oldest = model.oldestMeasurement, !model.isScanning {
+                    Text("measured \(oldest, format: .relative(presentation: .named))")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                        .padding(.trailing, 8)
+                }
                 Button {
                     Task { await model.refresh() }
                 } label: {
