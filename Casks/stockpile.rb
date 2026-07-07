@@ -1,6 +1,6 @@
 cask "stockpile" do
-  version "0.1.4"
-  sha256 "8b4dba53221e90cc4462234642271f5ac3b785f8eb6da2854a0fe1d277fba186"
+  version "0.3.0"
+  sha256 "82e20729287da8d3b10ea5604b27b04c3e1b1a20c057dcdffcb5c8e3689a03fe"
 
   url "https://github.com/kennykankush/stockpile/releases/download/v#{version}/Stockpile-#{version}.zip"
   name "Stockpile"
