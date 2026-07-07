@@ -1,52 +1,75 @@
 import SwiftUI
 
-/// The standard surface: flat fill, hairline edge, consistent radius.
-/// Glass is reserved for the Overview hero — everything else stays quiet.
+/// The standard surface: one step up the ladder, hairline edge with a faint
+/// top-light — depth without a single shadow. Content never gets glass;
+/// glass belongs to the chrome (the sidebar has it natively).
 struct Card<Content: View>: View {
-    var padding: CGFloat = 20
+    var padding: CGFloat = 22
     @ViewBuilder var content: () -> Content
 
     var body: some View {
         content()
             .padding(padding)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.radiusCard, style: .continuous))
+            .background(Theme.surface1, in: RoundedRectangle(cornerRadius: Theme.radiusCard, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: Theme.radiusCard, style: .continuous)
-                    .strokeBorder(Theme.hairline, lineWidth: 1)
+                    .strokeBorder(
+                        LinearGradient(
+                            colors: [Theme.edgeHighlight, Theme.hairline],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        ),
+                        lineWidth: 1
+                    )
             }
     }
 }
 
-/// The hero surface: the one place liquid glass is allowed.
+/// The hero surface: same ladder, more presence — larger radius and padding,
+/// a slightly stronger top light. Opaque, like everything content.
 struct HeroCard<Content: View>: View {
     @ViewBuilder var content: () -> Content
 
     var body: some View {
         content()
-            .padding(28)
+            .padding(30)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(.white.opacity(0.03), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-            .glassEffect(.regular, in: .rect(cornerRadius: 18))
+            .background(Theme.surface1, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .strokeBorder(.white.opacity(0.09), lineWidth: 1)
+                    .strokeBorder(
+                        LinearGradient(
+                            colors: [.white.opacity(0.13), Theme.hairline],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        ),
+                        lineWidth: 1
+                    )
             }
     }
 }
 
-/// A small tinted icon container — the leading element of rows and tiles.
+/// A small icon container. Neutral by default — one step up the ladder with
+/// a secondary glyph. Pass a tint only when the color *means* something.
 struct IconTile: View {
     let symbol: String
-    let tint: Color
+    var tint: Color? = nil
     var size: CGFloat = 30
 
     var body: some View {
         Image(systemName: symbol)
-            .font(.system(size: size * 0.44, weight: .medium))
-            .foregroundStyle(tint)
+            .font(.system(size: size * 0.42, weight: .medium))
+            .foregroundStyle(tint ?? Color.secondary)
             .frame(width: size, height: size)
-            .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: size * 0.28, style: .continuous))
+            .background(
+                tint.map { $0.opacity(0.10) } ?? Theme.surface2,
+                in: RoundedRectangle(cornerRadius: size * 0.27, style: .continuous)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: size * 0.27, style: .continuous)
+                    .strokeBorder(tint?.opacity(0.2) ?? Theme.hairline, lineWidth: 1)
+            }
     }
 }
 
@@ -58,12 +81,12 @@ struct LegendDot: View {
 
     var body: some View {
         HStack(spacing: 7) {
-            Circle().fill(color).frame(width: 7, height: 7)
+            Circle().fill(color).frame(width: 6, height: 6)
             Text(label)
-                .font(.caption.weight(.medium))
+                .font(.system(size: 12, weight: .medium))
             if let detail {
                 Text(detail)
-                    .font(.caption)
+                    .font(.system(size: 12))
                     .foregroundStyle(.secondary)
                     .monospacedDigit()
             }
@@ -78,15 +101,17 @@ struct TierBadge: View {
 
     var body: some View {
         Text(label)
-            .font(.caption2.weight(.semibold))
+            .font(.system(size: 10, weight: .semibold))
+            .tracking(0.2)
             .foregroundStyle(color)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 3)
-            .background(color.opacity(0.12), in: Capsule())
+            .padding(.horizontal, 7)
+            .padding(.vertical, 2.5)
+            .background(color.opacity(0.10), in: Capsule())
+            .overlay(Capsule().strokeBorder(color.opacity(0.22), lineWidth: 1))
     }
 }
 
-/// A stat tile for the Overview grid.
+/// A stat tile: tracked-out caps label, big rounded numeral, quiet caption.
 struct StatTile: View {
     let symbol: String
     let tint: Color
@@ -95,23 +120,43 @@ struct StatTile: View {
     let caption: String
 
     var body: some View {
-        Card(padding: 18) {
-            VStack(alignment: .leading, spacing: 12) {
+        Card(padding: 20) {
+            VStack(alignment: .leading, spacing: 14) {
                 HStack(spacing: 9) {
-                    IconTile(symbol: symbol, tint: tint, size: 26)
+                    IconTile(symbol: symbol, tint: tint, size: 24)
                     Text(label.uppercased())
-                        .font(.caption.weight(.semibold))
-                        .tracking(1.0)
+                        .font(.system(size: 11, weight: .semibold))
+                        .tracking(1.4)
                         .foregroundStyle(.secondary)
                 }
                 Text(value)
-                    .font(.system(size: 26, weight: .semibold, design: .rounded))
+                    .font(.system(size: 28, weight: .semibold, design: .rounded))
+                    .tracking(-0.5)
                     .monospacedDigit()
                 Text(caption)
-                    .font(.caption)
+                    .font(.system(size: 11))
                     .foregroundStyle(.tertiary)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
+    }
+}
+
+/// The unified list row chassis: bare on the canvas, hover lifts one surface
+/// step. Used by Descend, Apps, and any large list.
+struct HoverRow<Content: View>: View {
+    @ViewBuilder var content: () -> Content
+    @State private var hovering = false
+
+    var body: some View {
+        content()
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(
+                hovering ? Theme.surface2 : .clear,
+                in: RoundedRectangle(cornerRadius: Theme.radiusRow, style: .continuous)
+            )
+            .contentShape(RoundedRectangle(cornerRadius: Theme.radiusRow, style: .continuous))
+            .onHover { hovering = $0 }
     }
 }

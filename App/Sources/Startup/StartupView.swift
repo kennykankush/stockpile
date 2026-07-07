@@ -155,7 +155,7 @@ private struct StartupRow: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 9)
         .background(
-            hovering ? Theme.surfaceHover : .clear,
+            hovering ? Theme.surface2 : .clear,
             in: RoundedRectangle(cornerRadius: Theme.radiusRow, style: .continuous)
         )
         .onHover { hovering = $0 }

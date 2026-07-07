@@ -117,7 +117,7 @@ struct DescendView: View {
                         .font(.callout.weight(.semibold))
                         .foregroundStyle(.secondary)
                         .frame(width: 24, height: 24)
-                        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 7))
+                        .background(Theme.surface2, in: RoundedRectangle(cornerRadius: 7))
                 }
                 .buttonStyle(.plain)
                 .padding(.trailing, 6)
@@ -164,13 +164,13 @@ struct DescendView: View {
 private struct EntryRow: View {
     let entry: ScannedEntry
     let fractionOfLargest: Double
-    @State private var hovering = false
 
     var body: some View {
+        HoverRow {
         HStack(spacing: 12) {
             IconTile(
                 symbol: entry.isDirectory ? "folder.fill" : "doc",
-                tint: entry.rule?.tier.color ?? (entry.isDirectory ? Theme.purgeable : .secondary),
+                tint: entry.rule?.tier.color,
                 size: 28
             )
 
@@ -197,19 +197,12 @@ private struct EntryRow: View {
                     .font(.system(size: 13, weight: .semibold, design: .rounded))
                     .monospacedDigit()
                 Capsule()
-                    .fill((entry.rule?.tier.color ?? Theme.purgeable).opacity(0.55))
+                    .fill((entry.rule?.tier.color ?? .white).opacity(entry.rule == nil ? 0.18 : 0.55))
                     .frame(width: max(64 * fractionOfLargest, 2), height: 2)
                     .frame(width: 64, alignment: .trailing)
             }
             .frame(width: 84, alignment: .trailing)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(
-            hovering ? Theme.surfaceHover : Theme.surface,
-            in: RoundedRectangle(cornerRadius: Theme.radiusRow, style: .continuous)
-        )
-        .contentShape(RoundedRectangle(cornerRadius: Theme.radiusRow, style: .continuous))
-        .onHover { hovering = $0 }
+        }
     }
 }

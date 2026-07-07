@@ -113,7 +113,7 @@ private struct CapacityHero: View {
     var body: some View {
         HeroCard {
             VStack(alignment: .leading, spacing: 22) {
-                HStack(alignment: .firstTextBaseline, spacing: 44) {
+                HStack(alignment: .firstTextBaseline, spacing: 56) {
                     bigNumber(
                         label: "Physical",
                         fraction: accounting.physicalUsedFraction,
@@ -151,21 +151,22 @@ private struct CapacityHero: View {
     }
 
     private func bigNumber(label: String, fraction: Double, detail: String, tint: Color) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 7) {
                 RoundedRectangle(cornerRadius: 1.5)
                     .fill(tint)
-                    .frame(width: 3, height: 12)
+                    .frame(width: 3, height: 11)
                 Text(label.uppercased())
-                    .font(.caption.weight(.semibold))
-                    .tracking(1.2)
+                    .font(.system(size: 11, weight: .semibold))
+                    .tracking(1.4)
                     .foregroundStyle(.secondary)
             }
             Text(fraction, format: .percent.precision(.fractionLength(0)))
-                .font(.system(size: 46, weight: .semibold, design: .rounded))
+                .font(.system(size: 62, weight: .semibold, design: .rounded))
+                .tracking(-2)
                 .monospacedDigit()
             Text(detail)
-                .font(.callout)
+                .font(.system(size: 13))
                 .foregroundStyle(.secondary)
                 .monospacedDigit()
         }
@@ -178,12 +179,12 @@ private struct CapacityHero: View {
             let purgeable = width * max(0, accounting.physicalUsedFraction - accounting.effectiveUsedFraction)
 
             HStack(spacing: 2) {
-                RoundedRectangle(cornerRadius: 4).fill(Theme.accent).frame(width: max(yours, 0))
-                RoundedRectangle(cornerRadius: 4).fill(Theme.purgeable.opacity(0.45)).frame(width: max(purgeable, 0))
-                RoundedRectangle(cornerRadius: 4).fill(.white.opacity(0.07))
+                RoundedRectangle(cornerRadius: 5).fill(Theme.accent).frame(width: max(yours, 0))
+                RoundedRectangle(cornerRadius: 5).fill(Theme.purgeable.opacity(0.45)).frame(width: max(purgeable, 0))
+                RoundedRectangle(cornerRadius: 5).fill(.white.opacity(0.06))
             }
         }
-        .frame(height: 8)
+        .frame(height: 12)
         .clipShape(Capsule())
     }
 }

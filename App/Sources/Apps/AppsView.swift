@@ -80,15 +80,21 @@ struct AppsView: View {
                     .padding(.horizontal, 12)
                     .padding(.vertical, 6)
                     .background(
-                        selected ? Color.white.opacity(0.09) : .clear,
+                        selected ? Theme.surface3 : .clear,
                         in: RoundedRectangle(cornerRadius: 8, style: .continuous)
                     )
+                    .overlay {
+                        if selected {
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .strokeBorder(Theme.hairlineStrong, lineWidth: 1)
+                        }
+                    }
                 }
                 .buttonStyle(.plain)
             }
         }
         .padding(3)
-        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+        .background(Theme.surface1, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 11, style: .continuous).strokeBorder(Theme.hairline, lineWidth: 1))
     }
 
@@ -106,9 +112,9 @@ struct AppsView: View {
 
 private struct AppRow: View {
     let app: InstalledApp
-    @State private var hovering = false
 
     var body: some View {
+        HoverRow {
         HStack(spacing: 12) {
             icon
                 .frame(width: 28, height: 28)
@@ -145,19 +151,13 @@ private struct AppRow: View {
             .monospacedDigit()
             .frame(width: 80, alignment: .trailing)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 7)
-        .background(
-            hovering ? Theme.surfaceHover : Theme.surface,
-            in: RoundedRectangle(cornerRadius: Theme.radiusRow, style: .continuous)
-        )
-        .onHover { hovering = $0 }
+        }
     }
 
     @ViewBuilder
     private var icon: some View {
         if app.source == .homebrewFormula {
-            IconTile(symbol: "terminal", tint: Theme.accent, size: 28)
+            IconTile(symbol: "terminal", size: 28)
         } else {
             Image(nsImage: NSWorkspace.shared.icon(forFile: app.bundlePath))
                 .resizable()
