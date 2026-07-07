@@ -16,7 +16,7 @@ fi
 ./scripts/release.sh
 ./scripts/update-cask.sh
 
-echo "▸ Creating GitHub release v$VERSION…"
+echo "▸ Creating GitHub release v${VERSION}…"
 gh release create "v$VERSION" "build/Stockpile-$VERSION.zip" \
     --title "Stockpile $VERSION" --generate-notes
 
