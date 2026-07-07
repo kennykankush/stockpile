@@ -38,7 +38,7 @@ unzip, drop into Applications. Signed with Developer ID and notarized by
 Apple — it opens with no warnings.
 
 > [!NOTE]
-> Read [VISION.md](VISION.md) — every decision traces back to it.
+> No treemaps. No scare tactics. It informs — you decide.
 
 ## Features
 

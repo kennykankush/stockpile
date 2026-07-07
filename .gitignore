@@ -15,3 +15,8 @@ xcuserdata/
 Core/.build/
 Core/.swiftpm/
 .swiftpm/
+
+# Internal working docs — local only
+VISION.md
+AUDIT.md
+audit/
