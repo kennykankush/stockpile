@@ -109,7 +109,7 @@ struct AppsView: View {
                         }
                     }
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(Pressable())
             }
         }
         .padding(3)
@@ -135,7 +135,7 @@ private struct AppRow: View {
     let app: InstalledApp
 
     var body: some View {
-        HoverRow {
+        HoverRow { hovering in
         HStack(spacing: 12) {
             icon
                 .frame(width: 28, height: 28)
@@ -145,10 +145,11 @@ private struct AppRow: View {
                     .font(.system(size: 13, weight: .medium))
                     .lineLimit(1)
                 Text(app.bundlePath)
-                    .font(.caption)
+                    .font(.system(size: 10.5))
                     .foregroundStyle(.tertiary)
                     .lineLimit(1)
                     .truncationMode(.middle)
+                    .opacity(hovering ? 1 : 0)
             }
 
             Spacer()

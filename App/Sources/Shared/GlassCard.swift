@@ -200,7 +200,7 @@ struct BarButton: View {
                 .background(Theme.surface2, in: Capsule())
                 .overlay(Capsule().strokeBorder(Theme.hairline, lineWidth: 1))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(Pressable())
         .disabled(disabled)
     }
 }
@@ -255,20 +255,50 @@ struct StatStrip: View {
 }
 
 /// The unified list row chassis: bare on the canvas, hover lifts one surface
-/// step. Used by Descend, Apps, and any large list.
+/// step. Content receives the hover state so rows can reveal detail on
+/// demand instead of captioning everything permanently.
 struct HoverRow<Content: View>: View {
-    @ViewBuilder var content: () -> Content
+    @ViewBuilder var content: (Bool) -> Content
     @State private var hovering = false
 
     var body: some View {
-        content()
+        content(hovering)
             .padding(.horizontal, 12)
-            .padding(.vertical, 8)
+            .padding(.vertical, 7)
             .background(
                 hovering ? Theme.surface2 : .clear,
                 in: RoundedRectangle(cornerRadius: Theme.radiusRow, style: .continuous)
             )
             .contentShape(RoundedRectangle(cornerRadius: Theme.radiusRow, style: .continuous))
             .onHover { hovering = $0 }
+    }
+}
+
+/// Data as graphics: a fixed-width proportional bar — the row-level
+/// visualization that turns lists into instruments.
+struct SizeBar: View {
+    let fraction: Double
+    var tint: Color = .white.opacity(0.30)
+    var width: CGFloat = 110
+
+    var body: some View {
+        ZStack(alignment: .leading) {
+            Capsule().fill(Theme.surface2)
+            Capsule()
+                .fill(tint)
+                .frame(width: max(width * min(fraction, 1), fraction > 0 ? 3 : 0))
+        }
+        .frame(width: width, height: 4)
+    }
+}
+
+/// Press feedback for anything clickable — the interface confirming it
+/// heard you. Subtle scale, fast ease-out, exactly once per press.
+struct Pressable: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.975 : 1)
+            .opacity(configuration.isPressed ? 0.85 : 1)
+            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
     }
 }

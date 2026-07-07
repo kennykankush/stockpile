@@ -151,8 +151,7 @@ struct DescendView: View {
                     EntryRow(
                         entry: entry,
                         fractionOfLargest: largest > 0 ? Double(entry.sizeBytes) / Double(largest) : 0
-                    )
-                    .onTapGesture {
+                    ) {
                         guard entry.isDirectory else { return }
                         model.path.append(entry.url)
                     }
@@ -168,45 +167,58 @@ struct DescendView: View {
 private struct EntryRow: View {
     let entry: ScannedEntry
     let fractionOfLargest: Double
+    let onOpen: () -> Void
 
     var body: some View {
-        HoverRow {
-        HStack(spacing: 12) {
-            IconTile(
-                symbol: entry.isDirectory ? "folder.fill" : "doc",
-                tint: entry.rule?.tier.color,
-                size: 28
-            )
+        Button(action: onOpen) {
+            HoverRow { hovering in
+                HStack(spacing: 12) {
+                    IconTile(
+                        symbol: entry.isDirectory ? "folder.fill" : "doc",
+                        tint: entry.rule?.tier.color,
+                        size: 26
+                    )
 
-            VStack(alignment: .leading, spacing: 1) {
-                Text(entry.name)
-                    .font(.system(size: 13, weight: .medium))
-                    .lineLimit(1)
-                if let rule = entry.rule {
-                    Text("\(rule.title) — \(rule.regeneration)")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(entry.name)
+                            .font(.system(size: 13, weight: .medium))
+                            .lineLimit(1)
+                        if let rule = entry.rule {
+                            Text(rule.title)
+                                .font(.system(size: 11))
+                                .foregroundStyle(rule.tier.color.opacity(0.9))
+                                .lineLimit(1)
+                        }
+                    }
+
+                    Spacer(minLength: 12)
+
+                    if let rule = entry.rule, hovering {
+                        Text(rule.regeneration)
+                            .font(.system(size: 11))
+                            .foregroundStyle(.tertiary)
+                            .lineLimit(1)
+                    }
+
+                    SizeBar(
+                        fraction: fractionOfLargest,
+                        tint: entry.rule?.tier.color.opacity(0.75) ?? .white.opacity(0.28)
+                    )
+
+                    Text(entry.sizeBytes.bytesFormatted)
+                        .font(.system(size: 13, weight: .semibold, design: .rounded))
+                        .monospacedDigit()
+                        .frame(width: 76, alignment: .trailing)
+
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.quaternary)
+                        .opacity(entry.isDirectory && hovering ? 1 : 0)
+                        .frame(width: 10)
                 }
             }
-
-            Spacer()
-
-            if let rule = entry.rule {
-                TierBadge(label: rule.tier.badgeLabel, color: rule.tier.color)
-            }
-
-            VStack(alignment: .trailing, spacing: 4) {
-                Text(entry.sizeBytes.bytesFormatted)
-                    .font(.system(size: 13, weight: .semibold, design: .rounded))
-                    .monospacedDigit()
-                Capsule()
-                    .fill((entry.rule?.tier.color ?? .white).opacity(entry.rule == nil ? 0.18 : 0.55))
-                    .frame(width: max(64 * fractionOfLargest, 2), height: 2)
-                    .frame(width: 64, alignment: .trailing)
-            }
-            .frame(width: 84, alignment: .trailing)
         }
-        }
+        .buttonStyle(Pressable())
+        .help(entry.rule.map { "\($0.explanation) \($0.regeneration)" } ?? entry.url.path)
     }
 }

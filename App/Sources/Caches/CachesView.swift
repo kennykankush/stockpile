@@ -93,12 +93,16 @@ struct CachesView: View {
     private func tierSection(_ tier: Tier, label: String, caption: String) -> some View {
         let items = model.items.filter { $0.rule.tier == tier }
         if !items.isEmpty {
+            let largest = items.map(\.sizeBytes).max() ?? 1
             VStack(alignment: .leading, spacing: 8) {
                 SectionLabel(text: label, trailing: caption)
                 Card(padding: 6) {
                     VStack(spacing: 0) {
                         ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
-                            ReclaimableRow(item: item)
+                            ReclaimableRow(
+                                item: item,
+                                fractionOfLargest: largest > 0 ? Double(item.sizeBytes) / Double(largest) : 0
+                            )
                             if index < items.count - 1 {
                                 Divider().overlay(Theme.hairline).padding(.leading, 50)
                             }
@@ -112,6 +116,8 @@ struct CachesView: View {
 
 private struct ReclaimableRow: View {
     let item: ReclaimableItem
+    let fractionOfLargest: Double
+    @State private var hovering = false
 
     private var abbreviatedPath: String {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
@@ -125,24 +131,34 @@ private struct ReclaimableRow: View {
             IconTile(
                 symbol: item.rule.tier == .cache ? "leaf" : "hammer",
                 tint: item.rule.tier.color,
-                size: 28
+                size: 26
             )
             VStack(alignment: .leading, spacing: 1) {
                 Text(item.rule.title)
                     .font(.system(size: 13, weight: .medium))
                 Text(abbreviatedPath)
-                    .font(.caption)
+                    .font(.system(size: 10.5))
                     .foregroundStyle(.tertiary)
                     .lineLimit(1)
                     .truncationMode(.middle)
             }
-            Spacer()
+            Spacer(minLength: 12)
+            if hovering {
+                Text(item.rule.regeneration)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+            }
+            SizeBar(fraction: fractionOfLargest, tint: item.rule.tier.color.opacity(0.75))
             Text(item.sizeBytes.bytesFormatted)
                 .font(.system(size: 13, weight: .semibold, design: .rounded))
                 .monospacedDigit()
+                .frame(width: 76, alignment: .trailing)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .help(item.rule.regeneration)
+        .contentShape(Rectangle())
+        .onHover { hovering = $0 }
+        .help(item.rule.explanation)
     }
 }

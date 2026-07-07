@@ -160,15 +160,8 @@ private struct CapacityHero: View {
     private func metricRow(_ label: String, _ value: String, percent: Double? = nil, hint: String? = nil, tint: Color) -> some View {
         HStack(spacing: 8) {
             Circle().fill(tint).frame(width: 6, height: 6)
-            VStack(alignment: .leading, spacing: 0) {
-                Text(label)
-                    .font(.system(size: 12, weight: .medium))
-                if let hint {
-                    Text(hint)
-                        .font(.system(size: 10.5))
-                        .foregroundStyle(.tertiary)
-                }
-            }
+            Text(label)
+                .font(.system(size: 12, weight: .medium))
             Spacer()
             if let percent {
                 Text(percent, format: .percent.precision(.fractionLength(0)))
@@ -180,7 +173,8 @@ private struct CapacityHero: View {
                 .font(.system(size: 14, weight: .semibold, design: .rounded))
                 .monospacedDigit()
         }
-        .padding(.vertical, 10)
+        .padding(.vertical, 11)
+        .help(hint ?? label)
     }
 
     private var capacityBar: some View {
