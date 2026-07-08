@@ -1,6 +1,9 @@
 import SwiftUI
 import ScannerKit
 import WidgetKit
+import ThermalKit
+import MemoryKit
+import BatteryKit
 
 /// Who's running — the "quit Spotify before clearing its cache" guard.
 enum RunningApps {
@@ -35,6 +38,10 @@ enum WidgetBridge {
         let physicalFree: Int64
         let purgeable: Int64
         let reclaimable: Int64
+        // The other three organs — optional so older payloads still decode.
+        var thermalRank: Int?
+        var memoryUsedFraction: Double?
+        var batteryHealth: Int?
     }
 
     static func export(accounting: DiskAccounting, reclaimable: Int64) {
@@ -47,7 +54,10 @@ enum WidgetBridge {
             effectiveUsedFraction: accounting.effectiveUsedFraction,
             physicalFree: accounting.physicalFree,
             purgeable: accounting.purgeable,
-            reclaimable: reclaimable
+            reclaimable: reclaimable,
+            thermalRank: ThermalLevel(ProcessInfo.processInfo.thermalState).rank,
+            memoryUsedFraction: MemoryMonitor().read()?.usedFraction,
+            batteryHealth: BatteryMonitor().read()?.healthPercent
         )
         try? FileManager.default.createDirectory(at: container, withIntermediateDirectories: true)
         if let data = try? JSONEncoder().encode(snapshot) {

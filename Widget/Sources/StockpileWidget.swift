@@ -9,12 +9,19 @@ struct DiskSnapshot: Codable {
     let physicalFree: Int64
     let purgeable: Int64
     let reclaimable: Int64
+    var thermalRank: Int?
+    var memoryUsedFraction: Double?
+    var batteryHealth: Int?
 
     static let sample = DiskSnapshot(
         date: .now, physicalUsedFraction: 0.66, effectiveUsedFraction: 0.37,
-        physicalFree: 165_000_000_000, purgeable: 146_000_000_000, reclaimable: 48_000_000_000
+        physicalFree: 165_000_000_000, purgeable: 146_000_000_000, reclaimable: 48_000_000_000,
+        thermalRank: 1, memoryUsedFraction: 0.72, batteryHealth: 96
     )
 }
+
+/// The thermal ladder headline, mirrored (the widget can't import ThermalKit).
+private let thermalHeadlines = ["Cool", "Warm", "Hot", "Throttling"]
 
 struct DiskEntry: TimelineEntry {
     let date: Date
@@ -113,17 +120,43 @@ struct DiskWidgetView: View {
             }
             Spacer(minLength: 0)
             bar(s).frame(height: 7)
-            HStack(spacing: 10) {
-                Text("\(s.physicalFree.formatted(.byteCount(style: .file))) strictly free")
-                Text("·").foregroundStyle(.tertiary)
-                Text("\(s.purgeable.formatted(.byteCount(style: .file))) purgeable")
-                Spacer()
-            }
-            .font(.system(size: 10))
-            .foregroundStyle(.secondary)
-            .monospacedDigit()
+            glanceRow(s)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+    }
+
+    /// The whole-machine glance — the other three organs, shrunk to a row.
+    private func glanceRow(_ s: DiskSnapshot) -> some View {
+        HStack(spacing: 0) {
+            glanceItem("HEAT", s.thermalRank.map { thermalHeadlines[min($0, 3)] } ?? "—",
+                       tint: rankTint(s.thermalRank ?? 0))
+            divider
+            glanceItem("MEMORY", s.memoryUsedFraction.map { $0.formatted(.percent.precision(.fractionLength(0))) } ?? "—",
+                       tint: fractionTint(s.memoryUsedFraction ?? 0))
+            divider
+            glanceItem("BATTERY", s.batteryHealth.map { "\($0)%" } ?? "—",
+                       tint: s.batteryHealth.map { $0 >= 80 ? accent : purgeableTint } ?? .secondary)
+        }
+    }
+
+    private var divider: some View {
+        Rectangle().fill(.white.opacity(0.08)).frame(width: 1, height: 22)
+    }
+
+    private func glanceItem(_ label: String, _ value: String, tint: Color) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(label).font(.system(size: 8, weight: .semibold)).tracking(0.8).foregroundStyle(.secondary)
+            Text(value).font(.system(size: 13, weight: .semibold, design: .rounded)).foregroundStyle(tint).monospacedDigit()
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.leading, 2)
+    }
+
+    private func rankTint(_ rank: Int) -> Color {
+        switch rank { case 0: accent; case 1: purgeableTint; case 2: .orange; default: .red }
+    }
+    private func fractionTint(_ f: Double) -> Color {
+        f > 0.9 ? .red : f > 0.75 ? .orange : accent
     }
 
     private func numberBlock(_ label: String, _ fraction: Double, tint: Color) -> some View {
