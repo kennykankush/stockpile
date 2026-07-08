@@ -225,13 +225,16 @@ struct Screen<Actions: View, Content: View>: View {
                     Text(title)
                         .font(.system(size: 20, weight: .bold))
                         .tracking(-0.4)
+                        .lineLimit(1).truncationMode(.tail)
                     if let subtitle {
                         Text(subtitle)
                             .font(.system(size: 11.5))
                             .foregroundStyle(.secondary)
+                            .lineLimit(1).truncationMode(.tail)
                     }
                 }
-                Spacer()
+                .layoutPriority(1)
+                Spacer(minLength: 8)
                 actions()
             }
             .padding(.horizontal, Theme.pagePadding)

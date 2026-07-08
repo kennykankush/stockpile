@@ -28,6 +28,19 @@ struct WindowsProbeTests {
     NO_BATTERY
     ===DOCKER===
     NO_DOCKER
+    ===CLOCK===
+    3401 3401
+    ===GPUSTATS===
+    NVIDIA GeForce RTX 3070 Ti, 100, 7877, 8192, 62, 119.56, 310.00, 72, 1995
+    ===PERCORE===
+    9 27 9 9 3 15 75 15 15 3 3 9 51 21 9 21
+    ===SWAP===
+    11970 3715
+    ===NETIO===
+    7664 9295
+    ===DISKIO===
+    0 0
+    ===DOCKERSTATS===
     """
 
     @Test("Parses Windows hardware, trims CPU whitespace")
@@ -85,6 +98,68 @@ struct WindowsProbeTests {
         #expect(!t.hasBattery)
         let laptop = Self.realOutput.replacingOccurrences(of: "NO_BATTERY", with: "BAT")
         #expect(try #require(WindowsProbe.parse(laptop)).hasBattery)
+    }
+
+    @Test("CPU clock: current + max MHz")
+    func clock() throws {
+        let t = try #require(WindowsProbe.parse(Self.realOutput))
+        #expect(t.cpuClockMHz == 3401)
+        #expect(t.cpuMaxClockMHz == 3401)
+    }
+
+    @Test("GPU: RTX 3070 Ti via nvidia-smi — util, VRAM, temp, power, fan, clock")
+    func gpu() throws {
+        let g = try #require(WindowsProbe.parse(Self.realOutput)?.gpu)
+        #expect(g.name == "NVIDIA GeForce RTX 3070 Ti")
+        #expect(g.utilization == 1.0)                      // 100%
+        #expect(g.memUsed == 7877 * 1024 * 1024)
+        #expect(g.memTotal == 8192 * 1024 * 1024)
+        #expect(g.tempC == 62)
+        #expect(g.powerDraw == 119.56)
+        #expect(g.powerLimit == 310.0)
+        #expect(abs((g.fanPercent ?? 0) - 0.72) < 0.001)
+        #expect(g.clockMHz == 1995)
+        #expect(abs(g.memFraction - 0.9616) < 0.001)
+    }
+
+    @Test("GPU temp surfaces as a temp reading since Windows hides CPU die temp")
+    func gpuTempAsSensor() throws {
+        let t = try #require(WindowsProbe.parse(Self.realOutput))
+        #expect(t.temps.contains { $0.label == "GPU" && $0.celsius == 62 })
+    }
+
+    @Test("No NVIDIA present degrades to no gpu, no temps")
+    func noNvidia() throws {
+        let legacy = Self.realOutput.replacingOccurrences(
+            of: "NVIDIA GeForce RTX 3070 Ti, 100, 7877, 8192, 62, 119.56, 310.00, 72, 1995",
+            with: "NO_NVIDIA")
+        let t = try #require(WindowsProbe.parse(legacy))
+        #expect(t.gpu == nil)
+        #expect(t.temps.isEmpty)
+    }
+
+    @Test("Per-core % from perf counters (16 threads)")
+    func perCore() throws {
+        let t = try #require(WindowsProbe.parse(Self.realOutput))
+        #expect(t.coreLoads.count == 16)
+        #expect(abs(t.coreLoads[6] - 0.75) < 0.001)    // the busy core
+        #expect(abs(t.coreLoads[0] - 0.09) < 0.001)
+    }
+
+    @Test("Swap (page file) MB → bytes")
+    func swap() throws {
+        let t = try #require(WindowsProbe.parse(Self.realOutput))
+        #expect(t.swapTotal == 11970 * 1048576)
+        #expect(t.swapUsed == 3715 * 1048576)
+    }
+
+    @Test("Throughput from instantaneous perf counters")
+    func throughput() throws {
+        let tp = try #require(WindowsProbe.parse(Self.realOutput)?.throughput)
+        #expect(tp.netRx == 7664)
+        #expect(tp.netTx == 9295)
+        #expect(tp.diskRead == 0)
+        #expect(tp.diskWrite == 0)
     }
 
     @Test("CRLF line endings parse — PowerShell over SSH emits \\r\\n")

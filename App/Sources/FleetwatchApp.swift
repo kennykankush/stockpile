@@ -11,6 +11,7 @@ struct FleetwatchApp: App {
                     MemoryPressureMonitor.shared.start()
                     SystemWatcher.shared.start()
                     TrashSentinel.shared.start()
+                    FleetMonitor.shared.requestNotifications()
                 }
         }
         .windowStyle(.hiddenTitleBar)

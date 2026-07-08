@@ -25,6 +25,13 @@ public enum WindowsProbe {
     "===GPU==="; (Get-CimInstance Win32_VideoController | Where-Object { $_.AdapterRAM -gt 0 } | Sort-Object AdapterRAM -Descending | Select-Object -First 1).Name
     "===BATTERY==="; if ($bat) { "BAT" } else { "NO_BATTERY" }
     "===DOCKER==="; if (Get-Command docker -ErrorAction SilentlyContinue) { docker ps --format '{{.Names}}|{{.Status}}' } else { "NO_DOCKER" }
+    "===CLOCK==="; "$($cpu.CurrentClockSpeed) $($cpu.MaxClockSpeed)"
+    "===GPUSTATS==="; if (Get-Command nvidia-smi -ErrorAction SilentlyContinue) { nvidia-smi --query-gpu=name,utilization.gpu,memory.used,memory.total,temperature.gpu,power.draw,power.limit,fan.speed,clocks.gr --format=csv,noheader,nounits } else { "NO_NVIDIA" }
+    "===PERCORE==="; (Get-CimInstance Win32_PerfFormattedData_PerfOS_Processor | Where-Object { $_.Name -ne '_Total' } | Sort-Object {[int]$_.Name} | ForEach-Object { $_.PercentProcessorTime }) -join ' '
+    "===SWAP==="; $pf=Get-CimInstance Win32_PageFileUsage; "$($pf.AllocatedBaseSize) $($pf.CurrentUsage)"
+    "===NETIO==="; $ni=Get-CimInstance Win32_PerfFormattedData_Tcpip_NetworkInterface | Where-Object { $_.Name -notmatch 'Loopback|isatap' }; "$((($ni | Measure-Object BytesReceivedPersec -Sum).Sum)) $((($ni | Measure-Object BytesSentPersec -Sum).Sum))"
+    "===DISKIO==="; $dd=Get-CimInstance Win32_PerfFormattedData_PerfDisk_PhysicalDisk | Where-Object { $_.Name -eq '_Total' }; "$($dd.DiskReadBytesPersec) $($dd.DiskWriteBytesPersec)"
+    "===DOCKERSTATS==="; if (Get-Command docker -ErrorAction SilentlyContinue) { docker stats --no-stream --format '{{.Name}}|{{.CPUPerc}}|{{.MemUsage}}|{{.MemPerc}}' }
     """
 
     public static func parse(_ output: String) -> MachineTelemetry? {
@@ -77,23 +84,51 @@ public enum WindowsProbe {
             kernel: osLines.count >= 2 ? osLines[1] : ""
         )
 
+        // Clock: "current max" MHz. GPU: nvidia-smi CSV or NO_NVIDIA.
+        let clockF = (s["CLOCK"]?.first ?? "").split(separator: " ").compactMap { Int($0) }
+        let clock = clockF.first
+        let maxClock = clockF.count > 1 ? clockF[1] : nil
+        let gpu = (s["GPUSTATS"]?.first).flatMap {
+            $0 == "NO_NVIDIA" ? nil : GPUStats.parse(nvidiaCSV: $0)
+        }
+        // Windows doesn't expose a reliable CPU die temperature; the GPU temp
+        // (from nvidia-smi) is surfaced on the GPU card instead.
+        let temps: [TempReading] = gpu?.tempC.map { [TempReading(label: "GPU", celsius: $0)] } ?? []
+
         let dockerLines = s["DOCKER"] ?? ["NO_DOCKER"]
         let hasDocker = !(dockerLines.first == "NO_DOCKER")
+        let dstats = LinuxProbe.parseDockerStats(s["DOCKERSTATS"] ?? [])
         let containers: [Container] = hasDocker
             ? dockerLines.filter { $0.contains("|") }.map {
                 let p = $0.split(separator: "|", maxSplits: 1).map(String.init)
-                return Container(name: p[0], status: p.count > 1 ? p[1] : "")
+                let st = dstats[p[0]]
+                return Container(name: p[0], status: p.count > 1 ? p[1] : "",
+                                 cpuPercent: st?.cpu, memUsed: st?.mem, memPercent: st?.memPct)
               } : []
+
+        // Per-core %, swap (page file, MB→bytes), and instantaneous throughput.
+        let coreLoads = (s["PERCORE"]?.first ?? "").split(separator: " ").compactMap { Double($0) }.map { $0 / 100 }
+        let swapF = (s["SWAP"]?.first ?? "").split(separator: " ").compactMap { Int64($0) }
+        let (swapTotal, swapUsed) = swapF.count >= 2 ? (swapF[0] * 1048576, swapF[1] * 1048576) : (Int64(0), Int64(0))
+        let netF = (s["NETIO"]?.first ?? "").split(separator: " ").compactMap { Int64($0) }
+        let dioF = (s["DISKIO"]?.first ?? "").split(separator: " ").compactMap { Int64($0) }
+        let throughput = (netF.count >= 2 || dioF.count >= 2)
+            ? Throughput(netRx: netF.first ?? 0, netTx: netF.count > 1 ? netF[1] : Int64(0),
+                         diskRead: dioF.first ?? 0, diskWrite: dioF.count > 1 ? dioF[1] : Int64(0))
+            : nil
 
         return MachineTelemetry(
             hardware: hardware,
             disks: disks,
             memTotal: memTotal, memUsed: memUsed, memAvailable: memAvailable, memCached: memCached,
+            swapTotal: swapTotal, swapUsed: swapUsed,
             load1: load, load5: load, load15: load,
             uptime: TimeInterval(s["UPTIME"]?.first ?? "") ?? 0,
             hasDocker: hasDocker,
             hasBattery: (s["BATTERY"]?.first ?? "NO_BATTERY") == "BAT",
-            containers: containers
+            containers: containers,
+            coreLoads: coreLoads, cpuClockMHz: clock, cpuMaxClockMHz: maxClock,
+            gpu: gpu, temps: temps, throughput: throughput
         )
     }
 

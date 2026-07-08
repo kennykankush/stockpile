@@ -25,6 +25,7 @@ enum Theme {
     static let metricMemory = Color(red: 0.55, green: 0.36, blue: 0.96)  // purple
     static let metricHeat = Color(red: 0.96, green: 0.62, blue: 0.11)    // orange
     static let metricCPU = Color(red: 0.08, green: 0.72, blue: 0.65)     // teal
+    static let metricGPU = Color(red: 0.42, green: 0.69, blue: 0.13)     // nvidia green
     static let ok = Color(red: 0.06, green: 0.73, blue: 0.51)            // green
     static let danger = Color(red: 0.94, green: 0.27, blue: 0.27)        // red
 
@@ -43,6 +44,11 @@ enum Theme {
     /// Severity color for a 0…1 usage fraction.
     static func severity(_ f: Double) -> Color {
         f > 0.9 ? danger : f > 0.75 ? metricHeat : ok
+    }
+
+    /// Temperature (°C) → color: cool reads calm, hot reads alarming.
+    static func tempColor(_ c: Double) -> Color {
+        c >= 85 ? danger : c >= 72 ? metricHeat : c >= 55 ? metricCPU : ok
     }
 }
 

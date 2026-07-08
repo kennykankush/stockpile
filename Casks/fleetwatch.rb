@@ -4,7 +4,7 @@ cask "fleetwatch" do
 
   url "https://github.com/kennykankush/fleetwatch/releases/download/v#{version}/Fleetwatch-#{version}.zip"
   name "Fleetwatch"
-  desc "Storage transparency for macOS — your disk, explained, not just displayed"
+  desc "Health & hardware monitor for your fleet of machines"
   homepage "https://github.com/kennykankush/fleetwatch"
 
   depends_on macos: ">= :tahoe"

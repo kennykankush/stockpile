@@ -97,6 +97,15 @@ struct RootView: View {
             }
         }
         .sheet(isPresented: $addingMachine) { AddMachineView() }
+        .task {
+            // Fleet heartbeat: sample every machine on a slow cadence so uptime
+            // history accumulates and offline alerts fire even for machines
+            // you're not currently viewing.
+            while !Task.isCancelled {
+                await store.refreshAll()
+                try? await Task.sleep(for: .seconds(60))
+            }
+        }
     }
 
     @ViewBuilder

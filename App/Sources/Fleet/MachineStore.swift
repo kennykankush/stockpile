@@ -55,10 +55,26 @@ final class MachineStore {
 
     // MARK: telemetry
 
+    /// Coalesces concurrent refreshes: a second caller (e.g. opening a machine
+    /// dashboard while the fleet grid's refresh is in flight) awaits the same
+    /// probe result instead of being silently skipped and left "Connecting…".
+    private var inFlight: [UUID: Task<Void, Never>] = [:]
+
     func refresh(_ machine: Machine) async {
-        guard !refreshing.contains(machine.id) else { return }
+        if let existing = inFlight[machine.id] { await existing.value; return }
+        let task = Task { await self.performRefresh(machine) }
+        inFlight[machine.id] = task
+        await task.value
+        inFlight[machine.id] = nil
+    }
+
+    private func performRefresh(_ machine: Machine) async {
         refreshing.insert(machine.id)
-        defer { refreshing.remove(machine.id) }
+        defer {
+            refreshing.remove(machine.id)
+            FleetMonitor.shared.record(machine.id, name: machine.name,
+                                       telemetry: telemetry[machine.id], online: online[machine.id] ?? false)
+        }
         if machine.kind == .local {
             telemetry[machine.id] = LocalTelemetry.snapshot()
             online[machine.id] = true
@@ -139,6 +155,7 @@ enum LocalTelemetry {
             memUsed: mem?.used ?? 0,
             memAvailable: mem?.available ?? 0,
             memCached: mem?.cached ?? 0,
+            swapTotal: swap.total, swapUsed: swap.used,
             load1: loads[0], load5: loads[1], load15: loads[2],
             uptime: ProcessInfo.processInfo.systemUptime,
             hasDocker: FileManager.default.fileExists(atPath: "/opt/homebrew/bin/docker")
@@ -146,6 +163,14 @@ enum LocalTelemetry {
             hasBattery: BatteryMonitor().read() != nil,
             containers: []
         )
+    }
+
+    /// Swap usage from `vm.swapusage`.
+    private static var swap: (total: Int64, used: Int64) {
+        var usage = xsw_usage()
+        var size = MemoryLayout<xsw_usage>.stride
+        guard sysctlbyname("vm.swapusage", &usage, &size, nil, 0) == 0 else { return (0, 0) }
+        return (Int64(usage.xsu_total), Int64(usage.xsu_used))
     }
 
     private static func sysctlString(_ name: String) -> String {

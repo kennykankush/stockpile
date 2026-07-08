@@ -16,6 +16,14 @@ public enum LinuxProbe {
     echo "===DOCKER==="; if command -v docker >/dev/null 2>&1; then docker ps --format '{{.Names}}|{{.Status}}' 2>/dev/null || echo DOCKER_NOPERM; else echo NO_DOCKER; fi
     echo "===BATTERY==="; ls /sys/class/power_supply/ 2>/dev/null | grep -iE "^BAT" || echo NO_BATTERY
     echo "===GPU==="; lspci 2>/dev/null | grep -iE "vga|3d|display" | sed "s/.*: //" | head -1 || echo NO_GPU
+    echo "===CLOCK==="; awk '/cpu MHz/{print $4; exit}' /proc/cpuinfo
+    echo "===TEMPS==="; for h in /sys/class/hwmon/hwmon*; do n=$(cat $h/name 2>/dev/null); for f in $h/temp*_input; do [ -f "$f" ] && echo "$n $(cat $f 2>/dev/null)"; done; done 2>/dev/null
+    echo "===SWAP==="; free -b | awk '/^Swap/{print $2, $3}'
+    echo "===GPUSTATS==="; if command -v nvidia-smi >/dev/null 2>&1; then nvidia-smi --query-gpu=name,utilization.gpu,memory.used,memory.total,temperature.gpu,power.draw,power.limit,fan.speed,clocks.gr --format=csv,noheader,nounits 2>/dev/null | head -1; else echo NO_NVIDIA; fi
+    echo "===DOCKERSTATS==="; if command -v docker >/dev/null 2>&1; then docker stats --no-stream --format '{{.Name}}|{{.CPUPerc}}|{{.MemUsage}}|{{.MemPerc}}' 2>/dev/null; fi
+    echo "===SAMPLE1==="; date +%s%N; grep '^cpu[0-9]' /proc/stat; awk 'NR>2 && $1!="lo:"{rx+=$2;tx+=$10} END{print "NET", rx, tx}' /proc/net/dev; awk '$3 ~ /^(sd[a-z]+|nvme[0-9]+n[0-9]+|vd[a-z]+|mmcblk[0-9]+)$/{r+=$6;w+=$10} END{print "DIO", r*512, w*512}' /proc/diskstats
+    sleep 0.5
+    echo "===SAMPLE2==="; date +%s%N; grep '^cpu[0-9]' /proc/stat; awk 'NR>2 && $1!="lo:"{rx+=$2;tx+=$10} END{print "NET", rx, tx}' /proc/net/dev; awk '$3 ~ /^(sd[a-z]+|nvme[0-9]+n[0-9]+|vd[a-z]+|mmcblk[0-9]+)$/{r+=$6;w+=$10} END{print "DIO", r*512, w*512}' /proc/diskstats
     """
 
     public static func parse(_ output: String) -> MachineTelemetry? {
@@ -61,22 +69,144 @@ public enum LinuxProbe {
 
         let dockerLines = sections["DOCKER"] ?? ["NO_DOCKER"]
         let hasDocker = !(dockerLines.first == "NO_DOCKER")
+        let stats = parseDockerStats(sections["DOCKERSTATS"] ?? [])
         let containers: [Container] = hasDocker
             ? dockerLines.filter { $0.contains("|") }.map {
                 let parts = $0.split(separator: "|", maxSplits: 1).map(String.init)
-                return Container(name: parts[0], status: parts.count > 1 ? parts[1] : "")
+                let name = parts[0]
+                let s = stats[name]
+                return Container(name: name, status: parts.count > 1 ? parts[1] : "",
+                                 cpuPercent: s?.cpu, memUsed: s?.mem, memPercent: s?.memPct)
               }
             : []
 
         let hasBattery = !((sections["BATTERY"]?.first ?? "NO_BATTERY") == "NO_BATTERY")
 
+        let clock = (sections["CLOCK"]?.first).flatMap { Double($0) }.map { Int($0) }
+        let temps = parseTemps(sections["TEMPS"] ?? [])
+        let gpu = (sections["GPUSTATS"]?.first).flatMap {
+            $0 == "NO_NVIDIA" ? nil : GPUStats.parse(nvidiaCSV: $0)
+        }
+
+        // SWAP: "total used" bytes.
+        let swapF = (sections["SWAP"]?.first ?? "").split(separator: " ").compactMap { Int64($0) }
+        let (swapTotal, swapUsed) = swapF.count >= 2 ? (swapF[0], swapF[1]) : (Int64(0), Int64(0))
+
+        // Two-sample delta → per-core load + network/disk throughput.
+        let (coreLoads, throughput) = parseDelta(sections["SAMPLE1"] ?? [], sections["SAMPLE2"] ?? [])
+
         return MachineTelemetry(
             hardware: hardware,
             disks: disks,
             memTotal: memTotal, memUsed: memUsed, memAvailable: memAvail, memCached: memCached,
+            swapTotal: swapTotal, swapUsed: swapUsed,
             load1: load.count > 0 ? load[0] : 0, load5: load.count > 1 ? load[1] : 0, load15: load.count > 2 ? load[2] : 0,
-            uptime: uptime, hasDocker: hasDocker, hasBattery: hasBattery, containers: containers
+            uptime: uptime, hasDocker: hasDocker, hasBattery: hasBattery, containers: containers,
+            coreLoads: coreLoads, cpuClockMHz: clock, gpu: gpu, temps: temps, throughput: throughput
         )
+    }
+
+    // MARK: delta sampling (per-core load + throughput)
+
+    private struct Sample {
+        let t: Double                 // ns epoch
+        let cores: [[Int64]]          // per-core jiffy fields
+        let netRx: Int64, netTx: Int64
+        let read: Int64, write: Int64
+    }
+
+    private static func parseSample(_ lines: [String]) -> Sample? {
+        guard let first = lines.first, let t = Double(first) else { return nil }
+        var cores: [[Int64]] = []
+        var rx: Int64 = 0, tx: Int64 = 0, rd: Int64 = 0, wr: Int64 = 0
+        for line in lines.dropFirst() {
+            let f = line.split(separator: " ")
+            if line.hasPrefix("cpu") {
+                let nums = f.dropFirst().compactMap { Int64($0) }
+                if nums.count >= 5 { cores.append(nums) }
+            } else if line.hasPrefix("NET"), f.count >= 3 {
+                rx = Int64(f[1]) ?? 0; tx = Int64(f[2]) ?? 0
+            } else if line.hasPrefix("DIO"), f.count >= 3 {
+                rd = Int64(f[1]) ?? 0; wr = Int64(f[2]) ?? 0
+            }
+        }
+        return Sample(t: t, cores: cores, netRx: rx, netTx: tx, read: rd, write: wr)
+    }
+
+    static func parseDelta(_ a: [String], _ b: [String]) -> ([Double], Throughput?) {
+        guard let s1 = parseSample(a), let s2 = parseSample(b), s2.t > s1.t else { return ([], nil) }
+        let dt = (s2.t - s1.t) / 1_000_000_000     // ns → s
+        guard dt > 0 else { return ([], nil) }
+
+        var loads: [Double] = []
+        for i in 0..<min(s1.cores.count, s2.cores.count) {
+            let x = s1.cores[i], y = s2.cores[i]
+            let totX = x.reduce(0, +), totY = y.reduce(0, +)
+            let idleX = x.count > 4 ? x[3] + x[4] : 0     // idle + iowait
+            let idleY = y.count > 4 ? y[3] + y[4] : 0
+            let dtot = Double(totY - totX), didle = Double(idleY - idleX)
+            loads.append(dtot > 0 ? max(0, min(1, (dtot - didle) / dtot)) : 0)
+        }
+        let rate: (Int64, Int64) -> Int64 = { new, old in Int64(max(0, Double(new - old) / dt)) }
+        let tp = Throughput(netRx: rate(s2.netRx, s1.netRx), netTx: rate(s2.netTx, s1.netTx),
+                            diskRead: rate(s2.read, s1.read), diskWrite: rate(s2.write, s1.write))
+        return (loads, tp)
+    }
+
+    // MARK: docker stats
+
+    /// Parses `docker stats` rows: "name|cpu%|used / total|mem%".
+    static func parseDockerStats(_ lines: [String]) -> [String: (cpu: Double, mem: Int64, memPct: Double)] {
+        var out: [String: (Double, Int64, Double)] = [:]
+        for line in lines {
+            let f = line.split(separator: "|").map { $0.trimmingCharacters(in: .whitespaces) }
+            guard f.count >= 4 else { continue }
+            let cpu = Double(f[1].replacingOccurrences(of: "%", with: "")) ?? 0
+            let memUsed = parseBinaryBytes(f[2].split(separator: "/").first.map { String($0).trimmingCharacters(in: .whitespaces) } ?? "")
+            let memPct = Double(f[3].replacingOccurrences(of: "%", with: "")) ?? 0
+            out[f[0]] = (cpu, memUsed, memPct)
+        }
+        return out
+    }
+
+    /// "911.6MiB" / "1.5GiB" / "512KiB" / "20B" → bytes.
+    static func parseBinaryBytes(_ s: String) -> Int64 {
+        let units: [(String, Double)] = [("GiB", 1073741824), ("MiB", 1048576), ("KiB", 1024),
+                                         ("GB", 1e9), ("MB", 1e6), ("kB", 1e3), ("B", 1)]
+        for (u, mult) in units where s.hasSuffix(u) {
+            let num = Double(s.dropLast(u.count).trimmingCharacters(in: .whitespaces)) ?? 0
+            return Int64(num * mult)
+        }
+        return 0
+    }
+
+    /// Aggregates raw `hwmon` sensor lines ("name millidegrees") into a few
+    /// friendly readings: CPU (k10temp/coretemp), iGPU (amdgpu), SSD (hottest
+    /// NVMe), System (acpitz).
+    static func parseTemps(_ lines: [String]) -> [TempReading] {
+        var cpu: Double?, gpu: Double?, nvme: Double?, sys: Double?
+        for line in lines {
+            let p = line.split(separator: " ", omittingEmptySubsequences: true)
+            guard p.count >= 2, let milli = Double(p[1]) else { continue }
+            let c = milli / 1000
+            guard c > 0, c < 150 else { continue }   // discard bogus sensors
+            let name = p[0].lowercased()
+            if name.contains("k10temp") || name.contains("coretemp") || name.contains("zenpower") {
+                if cpu == nil { cpu = c }
+            } else if name.contains("nvme") {
+                nvme = max(nvme ?? 0, c)
+            } else if name.contains("amdgpu") || name.contains("nouveau") || name.contains("radeon") {
+                gpu = c
+            } else if name.contains("acpitz") {
+                sys = c
+            }
+        }
+        var out: [TempReading] = []
+        if let cpu { out.append(TempReading(label: "CPU", celsius: cpu)) }
+        if let gpu { out.append(TempReading(label: "iGPU", celsius: gpu)) }
+        if let nvme { out.append(TempReading(label: "SSD", celsius: nvme)) }
+        if let sys { out.append(TempReading(label: "System", celsius: sys)) }
+        return out
     }
 
     /// Splits `===NAME===`-marked output into section → trimmed non-empty lines.

@@ -27,12 +27,14 @@ struct MachineDashboard: View {
     @State private var loadingContributors = false
     @State private var deltaBytes: Int64?
     @State private var reportCopied = false
+    @State private var systemInfo: SystemInfo?
+    @State private var loadingInfo = false
+    @State private var infoError: String?
+    @State private var showingInfo = false
 
     private var isLocal: Bool { machine.kind == .local }
     private var t: MachineTelemetry? { store.telemetry[machine.id] }
     private var online: Bool { store.online[machine.id] ?? isLocal }
-
-    private let grid = [GridItem(.adaptive(minimum: 330, maximum: 560), spacing: 16, alignment: .top)]
 
     var body: some View {
         Screen(title: machine.name, subtitle: subtitle, actions: {
@@ -46,6 +48,10 @@ struct MachineDashboard: View {
                     }
                 }
             }
+            BarButton(label: "System Info", symbol: "info.circle") {
+                showingInfo = true
+                Task { await loadSystemInfo() }
+            }
             BarButton(label: "Refresh", symbol: "arrow.clockwise", disabled: store.refreshing.contains(machine.id)) {
                 Task { await refresh() }
             }
@@ -55,15 +61,18 @@ struct MachineDashboard: View {
                     VStack(alignment: .leading, spacing: 16) {
                         if isLocal { SetupCard() }
                         identityStrip(t)
-                        LazyVGrid(columns: grid, spacing: 16) {
+                        MasonryLayout(minColumnWidth: 340, spacing: 16, maxColumns: 3) {
                             StorageCard(t: t, deltaBytes: deltaBytes)
                             MemoryCard(t: t)
-                            CPUCard(t: t, thermal: isLocal ? thermal : nil,
+                            CPUCard(t: t, os: machine.os, thermal: isLocal ? thermal : nil,
                                     contributors: contributors, loading: loadingContributors,
                                     onQuit: quit)
+                            if let gpu = t.gpu { GPUCard(g: gpu) }
+                            if let tp = t.throughput { ActivityCard(tp: tp) }
                             if t.hasDocker { DockerCard(containers: t.containers) }
                             if isLocal, let battery { BatteryCard(b: battery) }
                             if isLocal { ReclaimableCard(model: reclaimable, onOpen: onOpenCaches) }
+                            UptimeCard(id: machine.id)
                         }
                     }
                     .padding(Theme.pagePadding)
@@ -80,7 +89,52 @@ struct MachineDashboard: View {
                 }
             }
         }
-        .task(id: machine.id) { await load() }
+        .task(id: machine.id) {
+            await load()
+            await pollLoop()
+        }
+        .sheet(isPresented: $showingInfo) {
+            SystemInfoView(machineName: machine.name, info: systemInfo, loading: loadingInfo, error: infoError) {
+                showingInfo = false
+            }
+        }
+    }
+
+    /// Fetches the static spec sheet once, lazily, when the sheet opens.
+    private func loadSystemInfo() async {
+        guard systemInfo == nil, !loadingInfo else { return }
+        loadingInfo = true; infoError = nil
+        defer { loadingInfo = false }
+        if isLocal {
+            systemInfo = LocalSystemInfo.build()
+        } else {
+            do {
+                systemInfo = try await SystemInfoProbe.fetch(
+                    ssh: SSHRunner(host: machine.host, user: machine.user), os: machine.os)
+            } catch {
+                infoError = "Couldn't reach \(machine.user)@\(machine.host)."
+            }
+        }
+    }
+
+    /// Keep the dashboard live while it's on screen. Local reads are native
+    /// and cheap (poll fast); remote is an SSH round trip (poll gently). The
+    /// task auto-cancels when the view leaves or the machine changes.
+    private func pollLoop() async {
+        let interval: Duration = isLocal ? .seconds(3) : .seconds(15)
+        var tick = 0
+        while !Task.isCancelled {
+            try? await Task.sleep(for: interval)
+            if Task.isCancelled { return }
+            await store.refresh(machine)
+            tick += 1
+            if isLocal {
+                battery = BatteryMonitor().read()
+                thermal = ThermalLevel(ProcessInfo.processInfo.thermalState)
+                // The process sample shells out to `top` — heavier; every ~4th tick.
+                if tick % 4 == 0 { await loadContributors() }
+            }
+        }
     }
 
     private var subtitle: String {
@@ -92,18 +146,45 @@ struct MachineDashboard: View {
     // MARK: identity
 
     private func identityStrip(_ t: MachineTelemetry) -> some View {
-        Card(padding: 14) {
-            HStack(spacing: 10) {
-                IconTile(symbol: isLocal ? "laptopcomputer" : (machine.os == .windows ? "pc" : "server.rack"),
-                         tint: online ? Theme.accent : Theme.inkTertiary, size: 34)
-                chip("CPU", "\(t.hardware.cpuModel.prefix(28))\(t.hardware.cpuModel.count > 28 ? "…" : "") · \(t.hardware.cores)c")
-                chip("RAM", t.hardware.ramTotal.bytesFormatted)
-                if let gpu = t.hardware.gpu { chip("GPU", String(gpu.prefix(24))) }
-                chip("OS", t.hardware.osName)
-                Spacer()
-                Circle().fill(online ? Theme.ok : Theme.inkTertiary.opacity(0.5)).frame(width: 9, height: 9)
+        Card(padding: 16) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 12) {
+                    IconTile(symbol: isLocal ? "laptopcomputer" : (machine.os == .windows ? "pc" : "server.rack"),
+                             tint: online ? Theme.accent : Theme.inkTertiary, size: 40)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(t.hardware.cpuModel.isEmpty ? machine.name : t.hardware.cpuModel)
+                            .font(.system(size: 15, weight: .bold)).tracking(-0.2).lineLimit(1)
+                        Text("\(t.hardware.osName) · \(uptimeText(t.uptime))")
+                            .font(.system(size: 11.5)).foregroundStyle(.secondary).lineLimit(1)
+                    }
+                    Spacer()
+                    HStack(spacing: 6) {
+                        Circle().fill(health.color).frame(width: 7, height: 7)
+                        Text(health.label).font(.system(size: 11, weight: .semibold)).foregroundStyle(health.color)
+                    }
+                    .padding(.horizontal, 10).padding(.vertical, 5)
+                    .background(health.color.opacity(0.12), in: Capsule())
+                }
+                Divider().overlay(Theme.hairline)
+                FlowLayout(spacing: 8, lineSpacing: 8) {
+                    chip("CORES", "\(t.hardware.cores)")
+                    chip("MEMORY", t.hardware.ramTotal.bytesFormatted)
+                    if let gpu = t.hardware.gpu { chip("GPU", String(gpu.prefix(26))) }
+                    chip("STORAGE", t.disks.reduce(Int64(0)) { $0 + $1.total }.bytesFormatted)
+                    if !t.hardware.kernel.isEmpty { chip("KERNEL", String(t.hardware.kernel.prefix(18))) }
+                }
             }
         }
+    }
+
+    /// A single overall health read — worst of the live metrics.
+    private var health: (label: String, color: Color) {
+        guard online, let t else { return ("Offline", Theme.inkTertiary) }
+        var worst = max(t.diskUsedFraction, t.memUsedFraction, min(t.loadFraction, 1))
+        if t.swapPressured { worst = max(worst, t.swapUsedFraction) }
+        if worst > 0.9 { return ("Critical", Theme.danger) }
+        if worst > 0.75 { return ("Warm", Theme.metricHeat) }
+        return ("Healthy", Theme.ok)
     }
 
     private func chip(_ k: String, _ v: String) -> some View {
@@ -214,24 +295,29 @@ private struct StorageCard: View {
         Card {
             VStack(alignment: .leading, spacing: 14) {
                 cardHeader("Storage", symbol: "internaldrive", tint: Theme.metricDisk,
-                           trailing: deltaBytes.map { AnyView(DeltaChip(bytes: $0)) })
+                           trailing: AnyView(HStack(spacing: 6) {
+                               if let ssd = t.temps.first(where: { $0.label == "SSD" }) { TempPill(celsius: ssd.celsius) }
+                               if let deltaBytes { DeltaChip(bytes: deltaBytes) }
+                           }))
                 HStack(spacing: 20) {
                     ZStack {
                         ArcGauge(fraction: t.diskUsedFraction, tint: Theme.metricDisk, lineWidth: 12, size: 116)
+                            .animation(.easeOut(duration: 0.4), value: t.diskUsedFraction)
                         VStack(spacing: 0) {
                             Text(t.diskUsedFraction, format: .percent.precision(.fractionLength(0)))
                                 .font(.system(size: 26, weight: .bold, design: .rounded)).tracking(-1).monospacedDigit()
-                            Text(t.disks.first?.name ?? "—").font(.system(size: 10)).foregroundStyle(.secondary)
+                            Text(t.diskUsed.bytesFormatted).font(.system(size: 10)).foregroundStyle(.secondary).monospacedDigit()
                         }
                     }
                     VStack(alignment: .leading, spacing: 10) {
                         ForEach(t.disks) { d in
                             VStack(alignment: .leading, spacing: 4) {
-                                HStack {
-                                    Text(d.name).font(.system(size: 12, weight: .semibold)).monospacedDigit()
-                                    Spacer()
+                                HStack(spacing: 6) {
+                                    Text(d.name).font(.system(size: 12, weight: .semibold)).monospacedDigit().lineLimit(1)
+                                    Spacer(minLength: 4)
                                     Text("\(d.free.bytesFormatted) free of \(d.total.bytesFormatted)")
                                         .font(.system(size: 11)).foregroundStyle(.secondary).monospacedDigit()
+                                        .lineLimit(1).minimumScaleFactor(0.75).layoutPriority(1)
                                 }
                                 ProgressBar(fraction: d.usedFraction, tint: Theme.severity(d.usedFraction))
                             }
@@ -247,28 +333,69 @@ private struct StorageCard: View {
 private struct MemoryCard: View {
     let t: MachineTelemetry
 
+    private var usedF: Double { t.memTotal > 0 ? Double(t.memUsed) / Double(t.memTotal) : 0 }
+    private var cachedF: Double { t.memTotal > 0 ? Double(t.memCached) / Double(t.memTotal) : 0 }
+    private var freeF: Double { max(0, 1 - usedF - cachedF) }
+
     var body: some View {
         Card {
             VStack(alignment: .leading, spacing: 14) {
-                cardHeader("Memory", symbol: "memorychip", tint: Theme.metricMemory)
+                cardHeader("Memory", symbol: "memorychip", tint: Theme.metricMemory,
+                           trailing: AnyView(Text(t.memTotal.bytesFormatted)
+                               .font(.system(size: 11, weight: .medium)).foregroundStyle(.secondary).monospacedDigit()))
                 HStack(spacing: 20) {
                     ZStack {
                         ArcGauge(fraction: t.memUsedFraction, tint: Theme.metricMemory, lineWidth: 12, size: 116)
+                            .animation(.easeOut(duration: 0.4), value: t.memUsedFraction)
                         VStack(spacing: 0) {
                             Text(t.memUsedFraction, format: .percent.precision(.fractionLength(0)))
                                 .font(.system(size: 26, weight: .bold, design: .rounded)).tracking(-1).monospacedDigit()
                             Text("in use").font(.system(size: 10)).foregroundStyle(.secondary)
                         }
                     }
-                    VStack(alignment: .leading, spacing: 0) {
-                        statRow("In use", t.memUsed.bytesFormatted, Theme.metricMemory)
-                        Divider().overlay(Theme.hairline)
-                        statRow("Cached — reclaimable", t.memCached.bytesFormatted, Theme.purgeable)
-                        Divider().overlay(Theme.hairline)
-                        statRow("Available", t.memAvailable.bytesFormatted, Theme.ok)
+                    VStack(alignment: .leading, spacing: 10) {
+                        SegmentBar(segments: [
+                            (usedF, Theme.metricMemory),
+                            (cachedF, Theme.purgeable),
+                            (freeF, Theme.track),
+                        ], height: 12)
+                        VStack(alignment: .leading, spacing: 7) {
+                            memLegend(Theme.metricMemory, "In use", t.memUsed)
+                            memLegend(Theme.purgeable, "Cached", t.memCached)
+                            memLegend(Theme.ok, "Free", max(0, t.memTotal - t.memUsed - t.memCached))
+                        }
+                    }
+                }
+                if t.swapTotal > 0 {
+                    Divider().overlay(Theme.hairline)
+                    VStack(alignment: .leading, spacing: 5) {
+                        HStack {
+                            Text("Swap").font(.system(size: 11.5)).foregroundStyle(.secondary)
+                            if t.swapUsedFraction > 0.5 && !t.swapPressured {
+                                Text("· idle pages, RAM has headroom")
+                                    .font(.system(size: 9.5)).foregroundStyle(Theme.inkTertiary).lineLimit(1)
+                            }
+                            Spacer(minLength: 6)
+                            Text("\(t.swapUsed.bytesFormatted) / \(t.swapTotal.bytesFormatted)")
+                                .font(.system(size: 11.5, weight: .semibold, design: .rounded))
+                                .monospacedDigit().lineLimit(1).minimumScaleFactor(0.8)
+                                .foregroundStyle(t.swapPressured ? Theme.danger : .primary)
+                        }
+                        ProgressBar(fraction: t.swapUsedFraction,
+                                    tint: t.swapPressured ? Theme.severity(t.swapUsedFraction) : Theme.metricMemory.opacity(0.45))
                     }
                 }
             }
+        }
+    }
+
+    private func memLegend(_ color: Color, _ label: String, _ bytes: Int64) -> some View {
+        HStack(spacing: 8) {
+            RoundedRectangle(cornerRadius: 2).fill(color).frame(width: 9, height: 9)
+            Text(label).font(.system(size: 11.5)).foregroundStyle(.secondary)
+            Spacer()
+            Text(bytes.bytesFormatted)
+                .font(.system(size: 12, weight: .semibold, design: .rounded)).monospacedDigit()
         }
     }
 }
@@ -276,31 +403,65 @@ private struct MemoryCard: View {
 /// CPU: load vs cores; local adds thermal headline + top processes w/ quit.
 private struct CPUCard: View {
     let t: MachineTelemetry
+    var os: Machine.OS = .unknown
     var thermal: ThermalLevel?
     var contributors: [HeatContributor] = []
     var loading = false
     var onQuit: (HeatContributor) -> Void = { _ in }
 
+    /// Windows exposes an instantaneous utilization %, not a real load
+    /// average — so don't fake three identical loadavg rows there.
+    private var isLoadAverage: Bool { os != .windows }
+
     var body: some View {
         Card {
             VStack(alignment: .leading, spacing: 14) {
-                cardHeader("CPU", symbol: "cpu", tint: Theme.metricCPU,
-                           trailing: thermal.map { th in AnyView(TierBadge(label: th.headline, color: thermalColor(th))) })
+                cardHeader("CPU", symbol: "cpu", tint: Theme.metricCPU, trailing: AnyView(headerTrailing))
                 HStack(spacing: 20) {
                     ZStack {
                         ArcGauge(fraction: min(t.loadFraction, 1), tint: Theme.metricCPU, lineWidth: 12, size: 116)
+                            .animation(.easeOut(duration: 0.4), value: t.loadFraction)
                         VStack(spacing: 0) {
-                            Text(String(format: "%.2f", t.load1))
-                                .font(.system(size: 24, weight: .bold, design: .rounded)).tracking(-1).monospacedDigit()
-                            Text("load · \(t.hardware.cores)c").font(.system(size: 10)).foregroundStyle(.secondary)
+                            if isLoadAverage {
+                                Text(String(format: "%.2f", t.load1))
+                                    .font(.system(size: 26, weight: .bold, design: .rounded)).tracking(-1).monospacedDigit()
+                                Text(clockText ?? "load · \(t.hardware.cores)c").font(.system(size: 10)).foregroundStyle(.secondary)
+                            } else {
+                                Text(min(t.loadFraction, 1), format: .percent.precision(.fractionLength(0)))
+                                    .font(.system(size: 26, weight: .bold, design: .rounded)).tracking(-1).monospacedDigit()
+                                Text(clockText ?? "usage · \(t.hardware.cores)c").font(.system(size: 10)).foregroundStyle(.secondary)
+                            }
                         }
                     }
-                    VStack(alignment: .leading, spacing: 0) {
-                        statRow("1 min", String(format: "%.2f", t.load1), Theme.metricCPU)
-                        Divider().overlay(Theme.hairline)
-                        statRow("5 min", String(format: "%.2f", t.load5), Theme.metricCPU.opacity(0.7))
-                        Divider().overlay(Theme.hairline)
-                        statRow("15 min", String(format: "%.2f", t.load15), Theme.inkTertiary)
+                    if isLoadAverage {
+                        VStack(alignment: .leading, spacing: 0) {
+                            loadRow("1 min", String(format: "%.2f", t.load1), Theme.metricCPU)
+                            Divider().overlay(Theme.hairline)
+                            loadRow("5 min", String(format: "%.2f", t.load5), Theme.metricCPU.opacity(0.7))
+                            Divider().overlay(Theme.hairline)
+                            loadRow("15 min", String(format: "%.2f", t.load15), Theme.inkTertiary)
+                        }
+                    } else {
+                        VStack(alignment: .leading, spacing: 0) {
+                            loadRow("Utilization", "\(Int((min(t.loadFraction, 1) * 100).rounded()))%", Theme.metricCPU)
+                            Divider().overlay(Theme.hairline)
+                            loadRow("Cores", "\(t.hardware.cores)", Theme.inkTertiary)
+                            if let clk = t.cpuClockMHz {
+                                Divider().overlay(Theme.hairline)
+                                loadRow("Clock", String(format: "%.2f GHz", Double(clk) / 1000), Theme.metricCPU.opacity(0.7))
+                            }
+                        }
+                    }
+                }
+                if !t.coreLoads.isEmpty {
+                    Divider().overlay(Theme.hairline)
+                    VStack(alignment: .leading, spacing: 7) {
+                        HStack {
+                            Text("PER-CORE").font(.system(size: 9, weight: .semibold)).tracking(0.8).foregroundStyle(Theme.inkTertiary)
+                            Spacer()
+                            Text("\(t.coreLoads.count) threads").font(.system(size: 9.5)).foregroundStyle(Theme.inkTertiary)
+                        }
+                        CoreBars(loads: t.coreLoads)
                     }
                 }
                 if !contributors.isEmpty {
@@ -340,9 +501,161 @@ private struct CPUCard: View {
     private func thermalColor(_ l: ThermalLevel) -> Color {
         switch l { case .nominal: Theme.ok; case .fair: Theme.metricCPU; case .serious: Theme.metricHeat; case .critical: Theme.danger }
     }
+
+    /// A load-average row whose value right-aligns with the process rows below
+    /// — the trailing clear box reserves the same width the quit button takes.
+    private func loadRow(_ label: String, _ value: String, _ tint: Color) -> some View {
+        HStack(spacing: 8) {
+            Circle().fill(tint).frame(width: 6, height: 6)
+            Text(label).font(.system(size: 11.5)).foregroundStyle(.secondary)
+            Spacer()
+            Text(value).font(.system(size: 12.5, weight: .semibold, design: .rounded)).monospacedDigit()
+            Color.clear.frame(width: 14, height: 1)
+        }
+        .padding(.vertical, 7)
+    }
+
+    /// Clock as "3.97 GHz" for the gauge subtitle.
+    private var clockText: String? {
+        guard let mhz = t.cpuClockMHz, mhz > 0 else { return nil }
+        return String(format: "%.2f GHz · %dc", Double(mhz) / 1000, t.hardware.cores)
+    }
+
+    /// Trailing badges: CPU temp (remote), macOS thermal state (local).
+    @ViewBuilder private var headerTrailing: some View {
+        HStack(spacing: 6) {
+            if let cpuTemp = t.temps.first(where: { $0.label == "CPU" }) {
+                TempPill(celsius: cpuTemp.celsius)
+            }
+            if let thermal {
+                TierBadge(label: thermal.headline, color: thermalColor(thermal))
+            }
+        }
+    }
 }
 
-/// Docker: container list with health dots.
+/// A temperature badge — value in °C, tinted by how hot it is.
+struct TempPill: View {
+    let celsius: Double
+    var label: String? = nil
+    var body: some View {
+        HStack(spacing: 3) {
+            Image(systemName: "thermometer.medium").font(.system(size: 9, weight: .semibold))
+            if let label { Text(label).font(.system(size: 9.5, weight: .semibold)) }
+            Text("\(Int(celsius.rounded()))°").font(.system(size: 10.5, weight: .bold, design: .rounded)).monospacedDigit()
+        }
+        .foregroundStyle(Theme.tempColor(celsius))
+        .padding(.horizontal, 7).padding(.vertical, 3)
+        .background(Theme.tempColor(celsius).opacity(0.12), in: Capsule())
+    }
+}
+
+/// GPU: the showpiece for a discrete NVIDIA card — utilization arc, VRAM,
+/// temp, power draw vs limit, fan, clock. Appears only when nvidia-smi reads.
+private struct GPUCard: View {
+    let g: GPUStats
+
+    var body: some View {
+        Card {
+            VStack(alignment: .leading, spacing: 14) {
+                cardHeader("GPU", symbol: "cpu.fill", tint: Theme.metricGPU,
+                           trailing: g.tempC.map { AnyView(TempPill(celsius: $0)) })
+                HStack(spacing: 20) {
+                    ZStack {
+                        ArcGauge(fraction: g.utilization, tint: Theme.metricGPU, lineWidth: 12, size: 116)
+                            .animation(.easeOut(duration: 0.4), value: g.utilization)
+                        VStack(spacing: 0) {
+                            Text(g.utilization, format: .percent.precision(.fractionLength(0)))
+                                .font(.system(size: 26, weight: .bold, design: .rounded)).tracking(-1).monospacedDigit()
+                            Text("util").font(.system(size: 10)).foregroundStyle(.secondary)
+                        }
+                    }
+                    VStack(alignment: .leading, spacing: 10) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack {
+                                Text("VRAM").font(.system(size: 11.5)).foregroundStyle(.secondary)
+                                Spacer()
+                                Text("\(g.memUsed.bytesFormatted) / \(g.memTotal.bytesFormatted)")
+                                    .font(.system(size: 11.5, weight: .semibold, design: .rounded)).monospacedDigit()
+                                    .lineLimit(1).minimumScaleFactor(0.8)
+                            }
+                            ProgressBar(fraction: g.memFraction, tint: Theme.severity(g.memFraction))
+                        }
+                        if g.powerDraw != nil, g.powerLimit != nil {
+                            VStack(alignment: .leading, spacing: 4) {
+                                HStack {
+                                    Text("Power").font(.system(size: 11.5)).foregroundStyle(.secondary)
+                                    Spacer()
+                                    Text(powerText).font(.system(size: 11.5, weight: .semibold, design: .rounded))
+                                        .monospacedDigit().lineLimit(1).minimumScaleFactor(0.8)
+                                }
+                                ProgressBar(fraction: g.powerFraction, tint: Theme.metricGPU)
+                            }
+                        }
+                    }
+                }
+                Divider().overlay(Theme.hairline)
+                HStack(spacing: 0) {
+                    gpuStat("Name", String(g.name.replacingOccurrences(of: "NVIDIA GeForce ", with: "")))
+                    if let clock = g.clockMHz { gpuStat("Clock", "\(clock) MHz") }
+                    if let fan = g.fanPercent { gpuStat("Fan", "\(Int((fan * 100).rounded()))%") }
+                }
+            }
+        }
+    }
+
+    private var powerText: String {
+        let draw = Int(g.powerDraw!.rounded())
+        if let lim = g.powerLimit { return "\(draw) / \(Int(lim.rounded())) W" }
+        return "\(draw) W"
+    }
+
+    private func gpuStat(_ label: String, _ value: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(label.uppercased()).font(.system(size: 8.5, weight: .semibold)).tracking(0.7).foregroundStyle(Theme.inkTertiary)
+            Text(value).font(.system(size: 12, weight: .semibold, design: .rounded)).lineLimit(1)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// Network + disk I/O throughput — Beszel's bandwidth panel.
+private struct ActivityCard: View {
+    let tp: Throughput
+
+    var body: some View {
+        Card {
+            VStack(alignment: .leading, spacing: 12) {
+                cardHeader("Activity", symbol: "waveform.path.ecg", tint: Theme.accent)
+                HStack(spacing: 10) {
+                    rate("Down", tp.netRx, "arrow.down", Theme.metricDisk)
+                    rate("Up", tp.netTx, "arrow.up", Theme.metricMemory)
+                }
+                HStack(spacing: 10) {
+                    rate("Disk read", tp.diskRead, "arrow.down.to.line", Theme.metricCPU)
+                    rate("Disk write", tp.diskWrite, "arrow.up.to.line", Theme.metricHeat)
+                }
+            }
+        }
+    }
+
+    private func rate(_ label: String, _ bytes: Int64, _ symbol: String, _ tint: Color) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: 5) {
+                Image(systemName: symbol).font(.system(size: 9, weight: .bold)).foregroundStyle(tint)
+                Text(label.uppercased()).font(.system(size: 8.5, weight: .semibold)).tracking(0.6).foregroundStyle(Theme.inkTertiary)
+            }
+            Text(bytes.rateFormatted)
+                .font(.system(size: 16, weight: .bold, design: .rounded)).tracking(-0.4)
+                .monospacedDigit().lineLimit(1).minimumScaleFactor(0.7)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 12).padding(.vertical, 11)
+        .background(Theme.canvas, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+}
+
+/// Docker: per-container health, CPU%, and memory — Beszel's container view.
 private struct DockerCard: View {
     let containers: [Container]
 
@@ -354,11 +667,27 @@ private struct DockerCard: View {
                                .font(.system(size: 11)).foregroundStyle(.secondary)))
                 VStack(spacing: 0) {
                     ForEach(Array(containers.enumerated()), id: \.element.id) { i, c in
-                        HStack(spacing: 9) {
-                            Circle().fill(c.isHealthy ? Theme.ok : Theme.metricHeat).frame(width: 7, height: 7)
-                            Text(c.name).font(.system(size: 11.5, weight: .medium)).lineLimit(1)
-                            Spacer()
-                            Text(c.status).font(.system(size: 10.5)).foregroundStyle(Theme.inkTertiary).lineLimit(1)
+                        VStack(spacing: 6) {
+                            HStack(spacing: 9) {
+                                Circle().fill(c.isHealthy ? Theme.ok : Theme.metricHeat).frame(width: 7, height: 7)
+                                Text(c.name).font(.system(size: 11.5, weight: .medium)).lineLimit(1)
+                                Spacer(minLength: 6)
+                                if let cpu = c.cpuPercent {
+                                    Text("\(String(format: "%.0f", cpu))%")
+                                        .font(.system(size: 10.5, weight: .semibold, design: .rounded)).monospacedDigit()
+                                        .foregroundStyle(Theme.metricCPU)
+                                }
+                                if let mem = c.memUsed {
+                                    Text(mem.bytesFormatted)
+                                        .font(.system(size: 10.5, weight: .medium)).monospacedDigit()
+                                        .foregroundStyle(Theme.metricMemory).lineLimit(1)
+                                } else {
+                                    Text(c.status).font(.system(size: 10.5)).foregroundStyle(Theme.inkTertiary).lineLimit(1)
+                                }
+                            }
+                            if let cpu = c.cpuPercent {
+                                ProgressBar(fraction: min(cpu / 100, 1), tint: Theme.metricCPU.opacity(0.7))
+                            }
                         }
                         .padding(.vertical, 5)
                         if i < containers.count - 1 { Divider().overlay(Theme.hairline) }
@@ -435,6 +764,62 @@ private struct ReclaimableCard: View {
     }
 }
 
+/// Uptime: a status-page timeline of reachability over time + 24h uptime %,
+/// current streak, and last-seen. Fed by FleetMonitor's persisted history.
+private struct UptimeCard: View {
+    let id: UUID
+    @State private var monitor = FleetMonitor.shared
+
+    var body: some View {
+        let checks = monitor.timeline(id)
+        Card {
+            VStack(alignment: .leading, spacing: 12) {
+                cardHeader("Uptime", symbol: "checkmark.seal.fill", tint: Theme.ok,
+                           trailing: monitor.reachability(id).map {
+                               AnyView(Text("\(Int(($0 * 100).rounded()))% · 24h")
+                                   .font(.system(size: 11, weight: .semibold, design: .rounded))
+                                   .foregroundStyle($0 > 0.99 ? Theme.ok : $0 > 0.9 ? Theme.metricHeat : Theme.danger)) })
+                if checks.count >= 2 {
+                    StatusTimeline(checks: checks)
+                    HStack(spacing: 8) {
+                        if let s = monitor.currentStreak(id) {
+                            Circle().fill(s.online ? Theme.ok : Theme.danger).frame(width: 6, height: 6)
+                            Text("\(s.online ? "Up" : "Down") since \(s.since.formatted(.relative(presentation: .named)))")
+                                .font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
+                        }
+                        Spacer(minLength: 6)
+                        if let seen = monitor.lastSeen(id) {
+                            Text("seen \(seen.formatted(.relative(presentation: .named)))")
+                                .font(.system(size: 10.5)).foregroundStyle(Theme.inkTertiary).lineLimit(1)
+                        }
+                    }
+                } else {
+                    HStack(spacing: 6) {
+                        ProgressView().controlSize(.small)
+                        Text("Collecting reachability history…").font(.system(size: 11)).foregroundStyle(Theme.inkTertiary)
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// A status-page bar: one segment per check, green up / red down.
+struct StatusTimeline: View {
+    let checks: [StatusCheck]
+
+    var body: some View {
+        HStack(spacing: 2) {
+            ForEach(Array(checks.enumerated()), id: \.offset) { _, c in
+                RoundedRectangle(cornerRadius: 1.5)
+                    .fill(c.online ? Theme.ok : Theme.danger)
+                    .frame(maxWidth: .infinity)
+            }
+        }
+        .frame(height: 26)
+    }
+}
+
 // MARK: - shared bits
 
 private func cardHeader(_ title: String, symbol: String, tint: Color, trailing: AnyView? = nil) -> some View {
@@ -449,9 +834,10 @@ private func cardHeader(_ title: String, symbol: String, tint: Color, trailing: 
 private func statRow(_ label: String, _ value: String, _ tint: Color) -> some View {
     HStack(spacing: 8) {
         Circle().fill(tint).frame(width: 6, height: 6)
-        Text(label).font(.system(size: 11.5)).foregroundStyle(.secondary)
-        Spacer()
-        Text(value).font(.system(size: 12.5, weight: .semibold, design: .rounded)).monospacedDigit()
+        Text(label).font(.system(size: 11.5)).foregroundStyle(.secondary).lineLimit(1)
+        Spacer(minLength: 4)
+        Text(value).font(.system(size: 12.5, weight: .semibold, design: .rounded))
+            .monospacedDigit().lineLimit(1).minimumScaleFactor(0.8)
     }
     .padding(.vertical, 7)
 }
@@ -472,8 +858,35 @@ struct ProgressBar: View {
     }
 }
 
+/// A per-core equalizer — one vertical bar per logical core, height/color by
+/// load. The btop/iStat instrument-cluster look.
+struct CoreBars: View {
+    let loads: [Double]
+
+    var body: some View {
+        HStack(alignment: .bottom, spacing: 3) {
+            ForEach(Array(loads.enumerated()), id: \.offset) { _, load in
+                ZStack(alignment: .bottom) {
+                    RoundedRectangle(cornerRadius: 2).fill(Theme.track)
+                    RoundedRectangle(cornerRadius: 2).fill(Theme.severity(load))
+                        .frame(height: max(3, 34 * min(load, 1)))
+                }
+                .frame(maxWidth: .infinity)
+            }
+        }
+        .frame(height: 34)
+        .animation(.easeOut(duration: 0.4), value: loads)
+    }
+}
+
+extension Int64 {
+    /// "1.2 MB/s" — a throughput rate.
+    var rateFormatted: String { "\(bytesFormatted)/s" }
+}
+
 func uptimeText(_ seconds: TimeInterval) -> String {
-    let days = Int(seconds) / 86400
-    if days > 0 { return "up \(days)d" }
-    return "up \(Int(seconds) / 3600)h"
+    let s = Int(seconds)
+    if s >= 86400 { return "up \(s / 86400)d" }
+    if s >= 3600 { return "up \(s / 3600)h" }
+    return "up \(max(1, s / 60))m"
 }

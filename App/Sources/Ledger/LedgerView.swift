@@ -84,10 +84,10 @@ struct LedgerView: View {
                 SectionLabel(text: "Trends", trailing: "across \(events.filter { $0.kind == .snapshot }.count) snapshots")
                 HStack(spacing: 14) {
                     if disk.count >= 2 {
-                        Sparkline(title: "Disk used", points: disk, tint: Theme.accent) { Int64($0).bytesFormatted }
+                        Sparkline(title: "Disk used", points: disk, tint: Theme.metricDisk) { Int64($0).bytesFormatted }
                     }
                     if mem.count >= 2 {
-                        Sparkline(title: "Memory used", points: mem, tint: Theme.purgeable) { Int64($0).bytesFormatted }
+                        Sparkline(title: "Memory used", points: mem, tint: Theme.metricMemory) { Int64($0).bytesFormatted }
                     }
                 }
             }
