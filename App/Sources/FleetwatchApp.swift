@@ -6,7 +6,7 @@ struct FleetwatchApp: App {
         WindowGroup {
             RootView()
                 .frame(minWidth: 1040, minHeight: 680)
-                .preferredColorScheme(.dark)
+                .preferredColorScheme(.light)
                 .task {
                     MemoryPressureMonitor.shared.start()
                     SystemWatcher.shared.start()

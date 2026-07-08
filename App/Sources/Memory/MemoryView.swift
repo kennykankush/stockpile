@@ -66,7 +66,7 @@ struct MemoryView: View {
                 }
                 Spacer(minLength: 40)
                 VStack(spacing: 0) {
-                    metricRow("Naive \"used\"", (r.total - r.free).bytesFormatted, hint: "includes cached files", tint: .white.opacity(0.35))
+                    metricRow("Naive \"used\"", (r.total - r.free).bytesFormatted, hint: "includes cached files", tint: Theme.inkTertiary)
                     Divider().overlay(Theme.hairline)
                     metricRow("Cached files", r.cached.bytesFormatted, hint: "evictable — the difference", tint: Theme.purgeable.opacity(0.55))
                     Divider().overlay(Theme.hairline)

@@ -210,7 +210,7 @@ private struct EntryRow: View {
 
                     SizeBar(
                         fraction: fractionOfLargest,
-                        tint: entry.rule?.tier.color.opacity(0.75) ?? .white.opacity(0.28)
+                        tint: entry.rule?.tier.color.opacity(0.75) ?? Theme.inkTertiary.opacity(0.5)
                     )
 
                     Text(entry.sizeBytes.bytesFormatted)

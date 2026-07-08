@@ -1,34 +1,49 @@
 import SwiftUI
 import RulesKit
 
-/// Fleetwatch's design tokens — the Linear/Raycast school: an opaque
-/// near-black surface ladder for depth (no shadows, no glows), hairline
-/// borders, typography doing the drama, color doing almost nothing.
+/// Fleetwatch's design tokens — the expensive-light dashboard treatment:
+/// silver canvas, floating white cards on soft diffused shadows, saturated
+/// per-metric accents, big rounded numerals. Color *means* something here
+/// and is allowed to show it.
 enum Theme {
-    // MARK: Surface ladder (opaque — depth without shadows)
-    static let canvas = Color(red: 0.024, green: 0.027, blue: 0.033)      // ~#060709
-    static let surface1 = Color(red: 0.055, green: 0.059, blue: 0.071)    // cards
-    static let surface2 = Color(red: 0.080, green: 0.084, blue: 0.102)    // hover / controls
-    static let surface3 = Color(red: 0.104, green: 0.110, blue: 0.133)    // selected / lifted
+    // MARK: Canvas & surfaces (light ladder)
+    static let canvas = Color(red: 0.965, green: 0.969, blue: 0.976)     // #F6F7F9
+    static let surface1 = Color.white                                    // cards
+    static let surface2 = Color(red: 0.933, green: 0.941, blue: 0.957)   // controls / hover
+    static let surface3 = Color(red: 0.894, green: 0.906, blue: 0.929)   // selected
 
-    // MARK: Lines
-    static let hairline = Color.white.opacity(0.07)
-    static let hairlineStrong = Color.white.opacity(0.14)
-    /// Linear's signature: a faint top-edge light on lifted panels.
-    static let edgeHighlight = Color.white.opacity(0.10)
+    // MARK: Lines & ink
+    static let hairline = Color.black.opacity(0.06)
+    static let hairlineStrong = Color.black.opacity(0.12)
+    static let inkTertiary = Color(red: 0.58, green: 0.62, blue: 0.68)
+    /// Neutral bar-track behind proportional fills.
+    static let track = Color.black.opacity(0.06)
 
-    // MARK: Color — semantic only, accent near-nowhere
-    static let accent = Color(red: 0.39, green: 0.88, blue: 0.76)
-    static let purgeable = Color(red: 0.48, green: 0.62, blue: 0.86)
-    static let tierCache = Color(red: 0.45, green: 0.83, blue: 0.55)
-    static let tierRegenerable = Color(red: 0.93, green: 0.72, blue: 0.38)
-    static let tierData = Color(red: 0.91, green: 0.47, blue: 0.51)
+    // MARK: Metric palette — saturated, each organ owns a hue
+    static let accent = Color(red: 0.24, green: 0.39, blue: 0.87)        // brand blue
+    static let metricDisk = Color(red: 0.23, green: 0.51, blue: 0.96)    // blue
+    static let metricMemory = Color(red: 0.55, green: 0.36, blue: 0.96)  // purple
+    static let metricHeat = Color(red: 0.96, green: 0.62, blue: 0.11)    // orange
+    static let metricCPU = Color(red: 0.08, green: 0.72, blue: 0.65)     // teal
+    static let ok = Color(red: 0.06, green: 0.73, blue: 0.51)            // green
+    static let danger = Color(red: 0.94, green: 0.27, blue: 0.27)        // red
+
+    // Legacy tier/purgeable names, re-valued for light.
+    static let purgeable = Color(red: 0.38, green: 0.65, blue: 0.98)
+    static let tierCache = ok
+    static let tierRegenerable = metricHeat
+    static let tierData = danger
 
     // MARK: Metrics
-    static let radiusCard: CGFloat = 14
-    static let radiusRow: CGFloat = 9
-    static let pagePadding: CGFloat = 36
-    static let sectionGap: CGFloat = 28
+    static let radiusCard: CGFloat = 18
+    static let radiusRow: CGFloat = 10
+    static let pagePadding: CGFloat = 28
+    static let sectionGap: CGFloat = 22
+
+    /// Severity color for a 0…1 usage fraction.
+    static func severity(_ f: Double) -> Color {
+        f > 0.9 ? danger : f > 0.75 ? metricHeat : ok
+    }
 }
 
 extension Tier {
@@ -53,15 +68,14 @@ extension Int64 {
     }
 }
 
-/// Flat opaque canvas. No blooms, no gradients — surfaces and type carry
-/// the interface. (Glass lives in the chrome layer: the sidebar.)
+/// Silver-grey canvas — the cards float above it on soft shadows.
 struct Backdrop: View {
     var body: some View {
         Theme.canvas.ignoresSafeArea()
     }
 }
 
-/// Page header: display-weight title with tight tracking, quiet subtitle.
+/// Page header (legacy — most screens use Screen's pinned bar).
 struct PageHeader: View {
     let title: String
     let subtitle: String
@@ -78,7 +92,7 @@ struct PageHeader: View {
     }
 }
 
-/// Small-caps section label — tracked out, quiet.
+/// Small-caps section label.
 struct SectionLabel: View {
     let text: String
     var trailing: String? = nil
@@ -87,13 +101,13 @@ struct SectionLabel: View {
         HStack {
             Text(text.uppercased())
                 .font(.system(size: 11, weight: .semibold))
-                .tracking(1.4)
+                .tracking(1.2)
                 .foregroundStyle(.secondary)
             Spacer()
             if let trailing {
                 Text(trailing)
                     .font(.system(size: 11))
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(Theme.inkTertiary)
             }
         }
         .padding(.horizontal, 2)

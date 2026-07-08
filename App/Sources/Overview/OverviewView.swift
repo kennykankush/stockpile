@@ -52,8 +52,10 @@ struct OverviewView: View {
                     }
 
                     if let accounting {
-                        CapacityHero(accounting: accounting)
-                        diffLine(accounting)
+                        CapacityHero(
+                            accounting: accounting,
+                            deltaBytes: previousSnapshot?.metrics?["physicalUsed"].map { accounting.physicalUsed - $0 }
+                        )
                         reclaimableStrip
                     } else if let loadError {
                         Card {
@@ -185,37 +187,59 @@ struct OverviewView: View {
     }
 }
 
-/// Asymmetric editorial hero: the protagonist numeral left, a hairline-
-/// divided metric stack right, the capacity bar spanning underneath.
+/// Dashboard hero: arc gauge with the number in its center (the reference
+/// composition), delta chip from the last snapshot, metric stack right,
+/// segmented capacity bar underneath.
 private struct CapacityHero: View {
     let accounting: DiskAccounting
+    var deltaBytes: Int64? = nil
 
     var body: some View {
         HeroCard {
-            VStack(alignment: .leading, spacing: 26) {
-                HStack(alignment: .top, spacing: 0) {
-                    // Protagonist: physical usage — the real bytes.
-                    VStack(alignment: .leading, spacing: 2) {
-                        HStack(spacing: 7) {
-                            RoundedRectangle(cornerRadius: 1.5)
-                                .fill(Theme.accent)
-                                .frame(width: 3, height: 11)
-                            Text("DISK USED")
-                                .font(.system(size: 11, weight: .semibold))
-                                .tracking(1.4)
+            VStack(alignment: .leading, spacing: 22) {
+                HStack(alignment: .center, spacing: 34) {
+                    // The gauge — number lives in its center.
+                    ZStack {
+                        ArcGauge(fraction: accounting.physicalUsedFraction,
+                                 tint: Theme.metricDisk, lineWidth: 15, size: 168)
+                        VStack(spacing: 2) {
+                            Text(accounting.physicalUsedFraction, format: .percent.precision(.fractionLength(0)))
+                                .font(.system(size: 40, weight: .bold, design: .rounded))
+                                .tracking(-1.5)
+                                .monospacedDigit()
+                            Text("disk used")
+                                .font(.system(size: 11))
                                 .foregroundStyle(.secondary)
                         }
-                        Text(accounting.physicalUsedFraction, format: .percent.precision(.fractionLength(0)))
-                            .font(.system(size: 96, weight: .semibold, design: .rounded))
-                            .tracking(-4)
-                            .monospacedDigit()
-                        Text("\(accounting.physicalUsed.bytesFormatted) of \(accounting.totalCapacity.bytesFormatted)")
-                            .font(.system(size: 13))
-                            .foregroundStyle(.secondary)
-                            .monospacedDigit()
                     }
 
-                    Spacer(minLength: 40)
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack(spacing: 10) {
+                            Text(accounting.physicalUsed.bytesFormatted)
+                                .font(.system(size: 26, weight: .bold, design: .rounded))
+                                .tracking(-0.5)
+                                .monospacedDigit()
+                            if let deltaBytes {
+                                DeltaChip(bytes: deltaBytes)
+                            }
+                        }
+                        Text("of \(accounting.totalCapacity.bytesFormatted) · \(accounting.physicalFree.bytesFormatted) strictly free")
+                            .font(.system(size: 12.5))
+                            .foregroundStyle(.secondary)
+                            .monospacedDigit()
+
+                        VStack(alignment: .leading, spacing: 9) {
+                            capacityBar.frame(height: 12)
+                            HStack(spacing: 18) {
+                                LegendDot(color: Theme.metricDisk, label: "Yours", detail: accounting.effectiveUsed.bytesFormatted)
+                                LegendDot(color: Theme.purgeable, label: "Purgeable", detail: accounting.purgeable.bytesFormatted)
+                                LegendDot(color: Theme.inkTertiary.opacity(0.5), label: "Free", detail: accounting.physicalFree.bytesFormatted)
+                            }
+                        }
+                        .padding(.top, 4)
+                    }
+
+                    Spacer(minLength: 20)
 
                     // Metric stack: the second accounting and its parts.
                     VStack(spacing: 0) {
@@ -223,26 +247,15 @@ private struct CapacityHero: View {
                                   percent: accounting.effectiveUsedFraction, tint: Theme.purgeable)
                         Divider().overlay(Theme.hairline)
                         metricRow("Purgeable", accounting.purgeable.bytesFormatted,
-                                  hint: "auto-reclaimed by macOS", tint: Theme.purgeable.opacity(0.55))
+                                  hint: "auto-reclaimed by macOS", tint: Theme.purgeable.opacity(0.6))
                         Divider().overlay(Theme.hairline)
                         metricRow("Strictly free", accounting.physicalFree.bytesFormatted,
-                                  hint: "the df-style number", tint: .white.opacity(0.35))
+                                  hint: "the df-style number", tint: Theme.inkTertiary)
                         Divider().overlay(Theme.hairline)
                         metricRow("Effectively free", (accounting.physicalFree + accounting.purgeable).bytesFormatted,
-                                  hint: "what Finder calls available", tint: Theme.accent.opacity(0.7))
+                                  hint: "what Finder calls available", tint: Theme.ok)
                     }
-                    .frame(width: 300)
-                    .padding(.top, 4)
-                }
-
-                VStack(alignment: .leading, spacing: 10) {
-                    capacityBar
-                    HStack(spacing: 22) {
-                        LegendDot(color: Theme.accent, label: "Yours", detail: accounting.effectiveUsed.bytesFormatted)
-                        LegendDot(color: Theme.purgeable.opacity(0.55), label: "Purgeable", detail: accounting.purgeable.bytesFormatted)
-                        LegendDot(color: .white.opacity(0.22), label: "Free", detail: accounting.physicalFree.bytesFormatted)
-                        Spacer()
-                    }
+                    .frame(width: 270)
                 }
             }
         }
@@ -275,9 +288,9 @@ private struct CapacityHero: View {
             let purgeable = width * max(0, accounting.physicalUsedFraction - accounting.effectiveUsedFraction)
 
             HStack(spacing: 2) {
-                RoundedRectangle(cornerRadius: 5).fill(Theme.accent).frame(width: max(yours, 0))
+                RoundedRectangle(cornerRadius: 5).fill(Theme.metricDisk).frame(width: max(yours, 0))
                 RoundedRectangle(cornerRadius: 5).fill(Theme.purgeable.opacity(0.45)).frame(width: max(purgeable, 0))
-                RoundedRectangle(cornerRadius: 5).fill(.white.opacity(0.06))
+                RoundedRectangle(cornerRadius: 5).fill(Theme.track)
             }
         }
         .frame(height: 12)

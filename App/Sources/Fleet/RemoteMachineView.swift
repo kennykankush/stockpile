@@ -155,7 +155,7 @@ private struct RemoteDisk: View {
         StatStrip(columns: [
             .init(label: "Used", value: t.diskUsed.bytesFormatted, caption: t.diskUsedFraction.formatted(.percent.precision(.fractionLength(0))), tint: frac(t.diskUsedFraction)),
             .init(label: "Free", value: t.diskFree.bytesFormatted, caption: "available", tint: Theme.tierCache),
-            .init(label: "Total", value: t.diskTotal.bytesFormatted, caption: "root volume", tint: .white.opacity(0.4)),
+            .init(label: "Total", value: t.diskTotal.bytesFormatted, caption: "root volume", tint: Theme.inkTertiary),
         ])
     }
 }
@@ -180,7 +180,7 @@ private struct RemoteCPU: View {
         StatStrip(columns: [
             .init(label: "Load 1m", value: String(format: "%.2f", t.load1), caption: "\(Int(t.loadFraction*100))% of \(t.hardware.cores)c", tint: frac(t.loadFraction)),
             .init(label: "Load 5m", value: String(format: "%.2f", t.load5), caption: "5-min avg", tint: Theme.accent),
-            .init(label: "Load 15m", value: String(format: "%.2f", t.load15), caption: "15-min avg", tint: .white.opacity(0.4)),
+            .init(label: "Load 15m", value: String(format: "%.2f", t.load15), caption: "15-min avg", tint: Theme.inkTertiary),
         ])
     }
 }

@@ -387,7 +387,7 @@ private struct GhostRow: View {
             Button(action: onClear) {
                 Image(systemName: "trash")
                     .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(hovering ? Theme.tierData : Color.white.opacity(0.15))
+                    .foregroundStyle(hovering ? Theme.tierData : Theme.inkTertiary.opacity(0.4))
                     .frame(width: 24, height: 24)
             }
             .buttonStyle(Pressable())

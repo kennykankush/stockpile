@@ -77,7 +77,7 @@ struct BatteryView: View {
 
     private func stats(_ b: BatteryReading) -> some View {
         StatStrip(columns: [
-            .init(label: "Design capacity", value: "\(b.designCapacity) mAh", caption: "What it held brand new.", tint: .white.opacity(0.4)),
+            .init(label: "Design capacity", value: "\(b.designCapacity) mAh", caption: "What it held brand new.", tint: Theme.inkTertiary),
             .init(label: "Full capacity now", value: "\(b.maxCapacity) mAh", caption: "What a full charge holds today.", tint: Theme.accent),
             .init(label: "Cycles", value: "\(b.cycleCount)", caption: "Apple rates most cells to ~1000.", tint: Theme.tierRegenerable),
         ])

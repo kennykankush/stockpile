@@ -263,7 +263,7 @@ private struct ContributorRow: View {
             Button(action: onQuit) {
                 Image(systemName: "xmark.circle")
                     .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(hovering && contributor.isQuittable ? Theme.tierData : Color.white.opacity(0.12))
+                    .foregroundStyle(hovering && contributor.isQuittable ? Theme.tierData : Theme.inkTertiary.opacity(0.4))
                     .frame(width: 24, height: 24)
             }
             .buttonStyle(Pressable())
